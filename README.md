@@ -145,13 +145,20 @@ cp .env.example .env.local
 
 ### 3. Create staff accounts
 
-Add users in the Supabase dashboard. A `profiles` row is created automatically by
-the `on_auth_user_created` trigger with the `teacher` role; promote the first
-account to `admin`:
+Add users in the Supabase dashboard (Authentication → Users → Add user). A
+`profiles` row is created automatically by the `on_auth_user_created` trigger
+with the `teacher` role; promote the first account to `admin`:
 
 ```sql
 update public.profiles set role = 'admin' where email = 'you@school.edu.ng';
 ```
+
+To seed the very first administrator on a fresh project — or to recover a
+locked-out one — fill in the three variables at the top of
+[`supabase/scripts/create_admin.sql`](supabase/scripts/create_admin.sql) and run
+it in the SQL editor. It creates the `auth.users` row, the matching
+`auth.identities` row that email sign-in requires, and an admin profile, and is
+safe to re-run. Never commit that file with a real password in it.
 
 | Role | Can do |
 | --- | --- |
