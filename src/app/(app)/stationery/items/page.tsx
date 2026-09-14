@@ -2,23 +2,15 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { ArrowLeft } from 'lucide-react';
 
-import { QuerySelect } from '@/components/filters/query-select';
 import { CatalogueManager, type CatalogueRow } from '@/components/stationery/catalogue-manager';
 import { Alert, Card, PageHeader } from '@/components/ui/primitives';
 import { errorMessage } from '@/lib/utils';
-import { getCurrentProfile, getSections, getStationeryCatalogue } from '@/server/queries';
+import { getCurrentProfile, getStationeryCatalogue } from '@/server/queries';
 
 export const metadata: Metadata = { title: 'Stationery items' };
 
-interface PageProps {
-  searchParams: Promise<{ section?: string }>;
-}
-
-export default async function StationeryItemsPage({ searchParams }: PageProps) {
-  const params = await searchParams;
-  const [sections, profile] = await Promise.all([getSections(), getCurrentProfile()]);
-
-  const section = sections.find((item) => item.slug === params.section) ?? sections[0];
+export default async function StationeryItemsPage() {
+  const profile = await getCurrentProfile();
   const canManage = profile?.role === 'admin';
 
   return (
@@ -33,61 +25,32 @@ export default async function StationeryItemsPage({ searchParams }: PageProps) {
 
       <PageHeader
         title="Stationery items"
-        description="Set up what each section issues. These items become the columns of the class matrix and the checkboxes in the student drawer."
+        description="One catalogue for the whole school. Every item is offered for every student; staff tick the ones that apply."
       />
 
-      {!section ? (
-        <Alert tone="warning">No sections have been configured yet.</Alert>
-      ) : (
-        <>
-          <Card className="p-4">
-            <div className="max-w-sm">
-              <QuerySelect
-                label="Section"
-                param="section"
-                value={section.slug}
-                options={sections.map((item) => ({ value: item.slug, label: item.name }))}
-              />
-            </div>
-          </Card>
-
-          {!canManage && (
-            <Alert tone="info">
-              You can view this catalogue, but only an administrator can add or change items.
-            </Alert>
-          )}
-
-          <CataloguePanel
-            sectionId={section.id}
-            sectionName={section.name}
-            canManage={canManage}
-          />
-        </>
+      {!canManage && (
+        <Alert tone="info">
+          You can view this catalogue, but only an administrator can add or change items.
+        </Alert>
       )}
+
+      <CataloguePanel canManage={canManage} />
     </>
   );
 }
 
-async function CataloguePanel({
-  sectionId,
-  sectionName,
-  canManage,
-}: {
-  sectionId: string;
-  sectionName: string;
-  canManage: boolean;
-}) {
+async function CataloguePanel({ canManage }: { canManage: boolean }) {
   // Caught here rather than left to the error boundary: an uncaught throw is
   // replaced by a generic string in production, which tells the operator
   // nothing. Rendering the reason keeps the rest of the page usable.
   let items;
   try {
-    items = await getStationeryCatalogue(sectionId);
+    items = await getStationeryCatalogue();
   } catch (error) {
     return (
       <Card className="p-5">
         <Alert>
-          <p className="font-medium">The {sectionName} catalogue could not be loaded.</p>
+          <p className="font-medium">The catalogue could not be loaded.</p>
           <p className="mt-1 break-words font-mono text-xs">{errorMessage(error)}</p>
         </Alert>
       </Card>
@@ -104,12 +67,7 @@ async function CataloguePanel({
 
   return (
     <Card className="overflow-hidden">
-      <CatalogueManager
-        items={rows}
-        sectionId={sectionId}
-        sectionName={sectionName}
-        canManage={canManage}
-      />
+      <CatalogueManager items={rows} canManage={canManage} />
     </Card>
   );
 }

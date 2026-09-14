@@ -172,7 +172,6 @@ export interface Database {
       stationery_items: {
         Row: {
           id: string;
-          section_id: string;
           name: string;
           description: string | null;
           unit_price: number;
@@ -182,7 +181,6 @@ export interface Database {
           updated_at: string;
         };
         Insert: {
-          section_id: string;
           name: string;
           description?: string | null;
           unit_price?: number;
@@ -190,15 +188,8 @@ export interface Database {
           is_active?: boolean;
         };
         Update: Partial<Database['public']['Tables']['stationery_items']['Insert']>;
-        Relationships: [
-          {
-            foreignKeyName: 'stationery_items_section_id_fkey';
-            columns: ['section_id'];
-            isOneToOne: false;
-            referencedRelation: 'sections';
-            referencedColumns: ['id'];
-          },
-        ];
+        // The catalogue is shared school-wide; items belong to no section.
+        Relationships: [];
       };
       stationery_issues: {
         Row: {

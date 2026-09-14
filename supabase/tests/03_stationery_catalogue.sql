@@ -12,41 +12,40 @@ update public.profiles set role = 'teacher' where email = 'catalogue-teacher@sch
 set role authenticated;
 set request.jwt.claim.sub = '44444444-4444-4444-4444-444444444444';
 
-\echo '=== 1. Admin adds an item to a section ==='
-insert into public.stationery_items (section_id, name, description, unit_price, display_order)
-select id, 'Sharpener', 'Metal double-hole sharpener', 350, 7
-  from public.sections where slug = 'primary'
-returning name, unit_price, is_active;
+\echo '=== 1. Admin adds an item to the catalogue ==='
+insert into public.stationery_items (name, display_order)
+values ('Sharpener', 7)
+returning name, is_active;
 
-\echo '=== 2. Duplicate name within the same section is rejected ==='
+\echo '=== 2. Duplicate name is rejected across the whole catalogue ==='
 do $t$
 begin
-  insert into public.stationery_items (section_id, name, unit_price)
-  select id, 'Sharpener', 400 from public.sections where slug = 'primary';
+  insert into public.stationery_items (name) values ('Sharpener');
   raise exception 'FAIL: duplicate name accepted';
 exception when unique_violation then
-  raise notice 'PASS: duplicate name rejected within a section';
+  raise notice 'PASS: duplicate name rejected';
 end $t$;
 
-\echo '=== 3. The same name is allowed in a different section ==='
-insert into public.stationery_items (section_id, name, unit_price)
-select id, 'Sharpener', 400 from public.sections where slug = 'nursery';
-select count(*) as sharpeners_across_sections
-  from public.stationery_items where name = 'Sharpener';
+\echo '=== 3. Duplicates are rejected case-insensitively too ==='
+do $t$
+begin
+  insert into public.stationery_items (name) values ('  sHaRpEnEr ');
+  raise exception 'FAIL: case-variant duplicate accepted';
+exception when unique_violation then
+  raise notice 'PASS: case-variant duplicate rejected';
+end $t$;
 
 \echo '=== 4. Admin edits an item ==='
 update public.stationery_items
-   set name = 'Sharpener (metal)', unit_price = 500
+   set name = 'Sharpener (metal)'
  where name = 'Sharpener'
-   and section_id = (select id from public.sections where slug = 'primary')
-returning name, unit_price;
+returning name;
 
 \echo '=== 5. A teacher cannot write the catalogue ==='
 set request.jwt.claim.sub = '55555555-5555-5555-5555-555555555555';
 do $t$
 begin
-  insert into public.stationery_items (section_id, name, unit_price)
-  select id, 'Unauthorised Item', 1 from public.sections where slug = 'primary';
+  insert into public.stationery_items (name) values ('Unauthorised Item');
   raise exception 'FAIL: teacher wrote the catalogue';
 exception when insufficient_privilege then
   raise notice 'PASS: teacher blocked from adding items';
@@ -68,9 +67,7 @@ select count(*) as issued_initially from public.set_student_stationery(
   (select id from public.students where admission_number = 'CAT/001'),
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1))
-     from public.stationery_items i
-     join public.sections s on s.id = i.section_id
-    where s.slug = 'nursery' and i.is_active));
+     from public.stationery_items i where i.is_active));
 
 update public.stationery_items set is_active = false where name = 'Pencil Set';
 
@@ -81,9 +78,7 @@ select count(*) as issued_after_resave from public.set_student_stationery(
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1))
      from public.stationery_items i
-     join public.sections s on s.id = i.section_id
-    where s.slug = 'nursery' and i.is_active
-      and i.name in ('Colouring Book', 'Drawing Book')));
+    where i.is_active and i.name in ('Colouring Book', 'Drawing Book')));
 
 do $t$
 declare
@@ -113,8 +108,7 @@ end $t$;
 
 \echo '=== 8. Retired items leave the matrix columns but stay on the student ==='
 select name from public.stationery_items
- where section_id = (select id from public.sections where slug = 'nursery')
-   and is_active
+ where is_active
  order by display_order, name;
 
 select full_name, (select count(*) from jsonb_object_keys(issued)) as items_held
@@ -140,8 +134,7 @@ select i.name, si.quantity from public.set_student_stationery(
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', q.qty))
      from (values ('Colouring Book', 3), ('Drawing Book', 1)) as q(nm, qty)
-     join public.stationery_items i on i.name = q.nm
-     join public.sections s on s.id = i.section_id and s.slug = 'nursery')
+     join public.stationery_items i on i.name = q.nm)
 ) si join public.stationery_items i on i.id = si.item_id order by i.name;
 
 \echo '=== 11. Re-saving updates an existing quantity in place ==='
@@ -150,8 +143,7 @@ select i.name, si.quantity from public.set_student_stationery(
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', q.qty))
      from (values ('Colouring Book', 7), ('Drawing Book', 1)) as q(nm, qty)
-     join public.stationery_items i on i.name = q.nm
-     join public.sections s on s.id = i.section_id and s.slug = 'nursery')
+     join public.stationery_items i on i.name = q.nm)
 ) si join public.stationery_items i on i.id = si.item_id order by i.name;
 
 \echo '=== 12. Out-of-range and missing quantities are clamped, not rejected ==='
@@ -165,16 +157,10 @@ begin
     (select id from public.students where admission_number = 'CAT/001'),
     (select id from public.terms where is_current),
     jsonb_build_array(
-      jsonb_build_object('item_id', (select i.id from public.stationery_items i
-        join public.sections s on s.id = i.section_id
-       where s.slug = 'nursery' and i.name = 'Colouring Book'), 'quantity', 0),
+      jsonb_build_object('item_id', (select i.id from public.stationery_items i where i.name = 'Colouring Book'), 'quantity', 0),
       -- no quantity key at all
-      jsonb_build_object('item_id', (select i.id from public.stationery_items i
-        join public.sections s on s.id = i.section_id
-       where s.slug = 'nursery' and i.name = 'Drawing Book')),
-      jsonb_build_object('item_id', (select i.id from public.stationery_items i
-        join public.sections s on s.id = i.section_id
-       where s.slug = 'nursery' and i.name = 'Play Mat'), 'quantity', 99999)
+      jsonb_build_object('item_id', (select i.id from public.stationery_items i where i.name = 'Drawing Book')),
+      jsonb_build_object('item_id', (select i.id from public.stationery_items i where i.name = 'Play Mat'), 'quantity', 99999)
     ));
 
   select si.quantity into v_zero from public.stationery_issues si

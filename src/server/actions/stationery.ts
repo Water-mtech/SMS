@@ -58,7 +58,6 @@ export async function setStudentStationery(
 }
 
 const itemSchema = z.object({
-  sectionId: z.string().uuid('Select a section'),
   name: z.string().trim().min(1, 'Item name is required').max(120),
   displayOrder: z.coerce.number().int().min(0).max(999).default(0),
 });
@@ -76,10 +75,9 @@ function text(formData: FormData, key: string): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-/** Add an item to a section's catalogue. */
+/** Add an item to the shared catalogue. */
 export async function createStationeryItem(formData: FormData): Promise<ActionResult> {
   const parsed = itemSchema.safeParse({
-    sectionId: text(formData, 'sectionId'),
     name: text(formData, 'name'),
     displayOrder: text(formData, 'displayOrder') ?? 0,
   });
@@ -91,16 +89,15 @@ export async function createStationeryItem(formData: FormData): Promise<ActionRe
   try {
     const supabase = await createClient();
     const { error } = await supabase.from('stationery_items').insert({
-      section_id: parsed.data.sectionId,
       name: parsed.data.name,
       display_order: parsed.data.displayOrder,
     });
 
     if (error) {
-      // stationery_items_section_name_key: one name per section.
+      // stationery_items_name_key: names are unique across the catalogue.
       if (error.code === '23505') {
-        return failure('That section already has an item with this name', {
-          name: 'Already in this section',
+        return failure('An item with this name already exists', {
+          name: 'Already in the catalogue',
         });
       }
       return failure(fromPostgrestError(error));
@@ -113,12 +110,11 @@ export async function createStationeryItem(formData: FormData): Promise<ActionRe
   }
 }
 
-const updateItemSchema = itemSchema.omit({ sectionId: true }).extend({
+const updateItemSchema = itemSchema.extend({
   itemId: z.string().uuid(),
 });
 
-/** Edit an existing item. Its section is fixed: moving it would orphan the
- *  issue records of students in the section it came from. */
+/** Edit an existing item. */
 export async function updateStationeryItem(formData: FormData): Promise<ActionResult> {
   const parsed = updateItemSchema.safeParse({
     itemId: text(formData, 'itemId'),
@@ -142,8 +138,8 @@ export async function updateStationeryItem(formData: FormData): Promise<ActionRe
 
     if (error) {
       if (error.code === '23505') {
-        return failure('That section already has an item with this name', {
-          name: 'Already in this section',
+        return failure('An item with this name already exists', {
+          name: 'Already in the catalogue',
         });
       }
       return failure(fromPostgrestError(error));

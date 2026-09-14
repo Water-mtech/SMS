@@ -25,24 +25,18 @@ export interface CatalogueRow {
 
 interface CatalogueManagerProps {
   items: CatalogueRow[];
-  sectionId: string;
-  sectionName: string;
   canManage: boolean;
 }
 
 /**
- * Manage one section's stationery catalogue.
+ * Manage the school's stationery catalogue.
  *
- * Items are retired rather than deleted: a retired item disappears from the
- * class matrix and the student drawer, but every record of who already received
- * it stays intact.
+ * One shared list: every item is offered for every student, and staff tick the
+ * ones that apply. Items are retired rather than deleted, so a retired item
+ * disappears from the matrix and the drawer while the record of who already
+ * received it stays intact.
  */
-export function CatalogueManager({
-  items,
-  sectionId,
-  sectionName,
-  canManage,
-}: CatalogueManagerProps) {
+export function CatalogueManager({ items, canManage }: CatalogueManagerProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [editing, setEditing] = useState<CatalogueRow | null>(null);
@@ -67,11 +61,11 @@ export function CatalogueManager({
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">{sectionName} catalogue</h2>
+          <h2 className="text-sm font-semibold text-slate-900">Catalogue</h2>
           <p className="text-xs text-slate-500">
             {items.filter((item) => item.isActive).length} active item
-            {items.filter((item) => item.isActive).length === 1 ? '' : 's'} · shown as columns on the
-            class matrix
+            {items.filter((item) => item.isActive).length === 1 ? '' : 's'} · shown as columns on
+            every class matrix
           </p>
         </div>
         {canManage && (
@@ -85,11 +79,11 @@ export function CatalogueManager({
       {items.length === 0 ? (
         <EmptyState
           icon={<PackagePlus className="h-8 w-8" />}
-          title={`No stationery items for ${sectionName} yet`}
+          title="No stationery items yet"
           description={
             canManage
-              ? 'Add the items this section issues each term. They become the columns of the class matrix.'
-              : 'An administrator needs to add items to this section.'
+              ? 'Add the items the school issues each term. They become the columns of every class matrix.'
+              : 'An administrator needs to add items to the catalogue.'
           }
           action={
             canManage ? <Button onClick={() => setAdding(true)}>Add the first item</Button> : undefined
@@ -98,9 +92,7 @@ export function CatalogueManager({
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
-            <caption className="sr-only">
-              Stationery items belonging to the {sectionName} section.
-            </caption>
+            <caption className="sr-only">The school&apos;s stationery catalogue.</caption>
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-left">
                 <th scope="col" className="px-4 py-3 font-semibold text-slate-700">Item</th>
@@ -179,8 +171,6 @@ export function CatalogueManager({
 
       <ItemFormModal
         open={adding}
-        sectionId={sectionId}
-        sectionName={sectionName}
         onClose={() => setAdding(false)}
         onSaved={() => {
           setAdding(false);
@@ -191,8 +181,6 @@ export function CatalogueManager({
       <ItemFormModal
         open={editing !== null}
         item={editing ?? undefined}
-        sectionId={sectionId}
-        sectionName={sectionName}
         onClose={() => setEditing(null)}
         onSaved={() => {
           setEditing(null);
@@ -241,15 +229,11 @@ export function CatalogueManager({
 function ItemFormModal({
   open,
   item,
-  sectionId,
-  sectionName,
   onClose,
   onSaved,
 }: {
   open: boolean;
   item?: CatalogueRow;
-  sectionId: string;
-  sectionName: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -286,7 +270,7 @@ function ItemFormModal({
       open={open}
       onClose={onClose}
       title={editing ? 'Edit stationery item' : 'Add stationery item'}
-      description={`${sectionName} section`}
+      description="Offered for every student; staff tick what applies"
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={pending}>
@@ -302,11 +286,7 @@ function ItemFormModal({
       <form id={formId} key={item?.id ?? 'new'} action={onSubmit} className="space-y-4">
         {error && <Alert>{error}</Alert>}
 
-        {editing ? (
-          <input type="hidden" name="itemId" value={item?.id} />
-        ) : (
-          <input type="hidden" name="sectionId" value={sectionId} />
-        )}
+        {editing && <input type="hidden" name="itemId" value={item?.id} />}
 
         <TextInput
           label="Item name"

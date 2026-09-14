@@ -44,8 +44,7 @@ select count(*) as items_issued from public.set_student_stationery(
   (select id from public.students where admission_number = 'BFS/002'),
   (select id from public.terms where sequence = 1),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1))
-     from public.stationery_items i
-     join public.sections s on s.id = i.section_id where s.slug = 'primary'));
+     from public.stationery_items i where i.is_active));
 
 \echo '=== Teacher: cannot record a payment (finance only) ==='
 do $$

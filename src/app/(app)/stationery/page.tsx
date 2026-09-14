@@ -8,35 +8,26 @@ import { buttonStyles } from '@/components/ui/button';
 import { Card, PageHeader, Alert } from '@/components/ui/primitives';
 import { formatTerm } from '@/lib/format';
 import { errorMessage } from '@/lib/utils';
-import {
-  getClassMatrix,
-  getClasses,
-  getSections,
-  getStationeryItems,
-  getTerms,
-  resolveTerm,
-} from '@/server/queries';
+import { getClassMatrix, getClasses, getStationeryItems, getTerms, resolveTerm } from '@/server/queries';
 
 export const metadata: Metadata = { title: 'Stationery' };
 
 interface PageProps {
-  searchParams: Promise<{ section?: string; class?: string; term?: string }>;
+  searchParams: Promise<{ class?: string; term?: string }>;
 }
 
 export default async function StationeryPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const [sections, classes, terms] = await Promise.all([getSections(), getClasses(), getTerms()]);
+  const [classes, terms] = await Promise.all([getClasses(), getTerms()]);
 
-  const section = sections.find((item) => item.slug === params.section) ?? sections[0];
-  const sectionClasses = section ? classes.filter((item) => item.section_id === section.id) : [];
-  const currentClass = sectionClasses.find((item) => item.slug === params.class) ?? sectionClasses[0];
+  const currentClass = classes.find((item) => item.slug === params.class) ?? classes[0];
   const term = await resolveTerm(params.term);
 
   return (
     <>
       <PageHeader
         title="Stationery tracking"
-        description="Track, per section and class, exactly which items each student has collected this term."
+        description="Track, class by class, exactly which items each student has collected this term."
         action={
           <Link href="/stationery/items" className={buttonStyles({ variant: 'outline' })}>
             <PackagePlus className="h-4 w-4" aria-hidden="true" />
@@ -46,19 +37,15 @@ export default async function StationeryPage({ searchParams }: PageProps) {
       />
 
       <Card className="p-4">
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <QuerySelect
-            label="Section"
-            param="section"
-            value={section?.slug ?? ''}
-            resets={['class']}
-            options={sections.map((item) => ({ value: item.slug, label: item.name }))}
-          />
+        <div className="grid gap-4 sm:grid-cols-2">
           <QuerySelect
             label="Class"
             param="class"
             value={currentClass?.slug ?? ''}
-            options={sectionClasses.map((item) => ({ value: item.slug, label: item.name }))}
+            options={classes.map((item) => ({
+              value: item.slug,
+              label: `${item.name} · ${item.section.name}`,
+            }))}
           />
           <QuerySelect
             label="Term"
@@ -77,27 +64,20 @@ export default async function StationeryPage({ searchParams }: PageProps) {
           No academic term has been configured yet. Add a session and its terms before tracking
           stationery.
         </Alert>
-      ) : !section || !currentClass ? (
-        <Alert tone="warning">No classes have been set up for this section yet.</Alert>
+      ) : !currentClass ? (
+        <Alert tone="warning">No classes have been set up yet.</Alert>
       ) : (
-        <MatrixPanel
-          sectionId={section.id}
-          classId={currentClass.id}
-          className={currentClass.name}
-          termId={term.id}
-        />
+        <MatrixPanel classId={currentClass.id} className={currentClass.name} termId={term.id} />
       )}
     </>
   );
 }
 
 async function MatrixPanel({
-  sectionId,
   classId,
   className,
   termId,
 }: {
-  sectionId: string;
   classId: string;
   className: string;
   termId: string;
@@ -107,10 +87,7 @@ async function MatrixPanel({
   let items;
   let matrix;
   try {
-    [items, matrix] = await Promise.all([
-      getStationeryItems(sectionId),
-      getClassMatrix(classId, termId),
-    ]);
+    [items, matrix] = await Promise.all([getStationeryItems(), getClassMatrix(classId, termId)]);
   } catch (error) {
     return (
       <Card className="p-5">

@@ -108,12 +108,12 @@ export async function resolveTerm(termId?: string): Promise<Term | null> {
   return data ?? getCurrentTerm();
 }
 
-export const getStationeryItems = cache(async (sectionId: string): Promise<StationeryItem[]> => {
+/** The active catalogue. One shared list, offered to every student. */
+export const getStationeryItems = cache(async (): Promise<StationeryItem[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('stationery_items')
     .select('*')
-    .eq('section_id', sectionId)
     .eq('is_active', true)
     .order('display_order')
     .order('name');
@@ -127,20 +127,19 @@ export interface CatalogueItem extends StationeryItem {
 }
 
 /**
- * A section's full stationery catalogue, retired items included, with a count
- * of how many times each item has been issued.
+ * The full catalogue, retired items included, with a count of how many times
+ * each item has been issued.
  *
- * The counts come from one `in` query over the section's item ids and are
- * tallied here: PostgREST has no GROUP BY, and a catalogue is a few dozen items
- * at most, so this stays a single round trip either way.
+ * The counts come from one `in` query over the item ids and are tallied here:
+ * PostgREST has no GROUP BY, and a catalogue is a few dozen items at most, so
+ * this stays a single round trip either way.
  */
-export async function getStationeryCatalogue(sectionId: string): Promise<CatalogueItem[]> {
+export async function getStationeryCatalogue(): Promise<CatalogueItem[]> {
   const supabase = await createClient();
 
   const { data: items, error } = await supabase
     .from('stationery_items')
     .select('*')
-    .eq('section_id', sectionId)
     .order('is_active', { ascending: false })
     .order('display_order')
     .order('name');
