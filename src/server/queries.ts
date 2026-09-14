@@ -160,7 +160,7 @@ export async function getClassMatrix(classId: string, termId: string): Promise<M
     studentId: row.student_id,
     admissionNumber: row.admission_number,
     fullName: row.full_name,
-    issuedItemIds: new Set(row.issued_item_ids ?? []),
+    issued: new Map(Object.entries(row.issued ?? {}).map(([itemId, qty]) => [itemId, Number(qty)])),
   }));
 }
 

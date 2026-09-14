@@ -4,16 +4,27 @@ import { z } from 'zod';
  * Environment access is centralised so a missing variable fails at boot with a
  * readable message instead of surfacing as `undefined` deep inside a query.
  */
+// `required_error` matters as much as the min-length message: when a variable
+// is simply absent, Zod reports an invalid_type issue and would otherwise say
+// only "Required" against an internal field name, naming nothing actionable.
+const MISSING_KEY =
+  'Set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY (or the older NEXT_PUBLIC_SUPABASE_ANON_KEY)';
+
 const publicSchema = z.object({
-  NEXT_PUBLIC_SUPABASE_URL: z.string().url('NEXT_PUBLIC_SUPABASE_URL must be a valid URL'),
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: z.string().min(1, 'NEXT_PUBLIC_SUPABASE_ANON_KEY is required'),
+  supabaseUrl: z
+    .string({ required_error: 'NEXT_PUBLIC_SUPABASE_URL is required' })
+    .url('NEXT_PUBLIC_SUPABASE_URL must be a valid URL'),
+  supabaseKey: z.string({ required_error: MISSING_KEY }).min(1, MISSING_KEY),
 });
 
 // Next.js inlines `process.env.NEXT_PUBLIC_*` only for statically written
-// references, so they must be spelled out rather than looped over.
+// references, so both names are spelled out rather than looked up dynamically.
+// Supabase renamed the browser-safe key from "anon" to "publishable"; either
+// spelling is accepted so a project on the newer key still boots.
 export const publicEnv = publicSchema.parse({
-  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
+  supabaseKey:
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
 });
 
 export const school = {

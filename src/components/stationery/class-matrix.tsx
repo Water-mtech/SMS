@@ -15,7 +15,8 @@ export interface MatrixStudent {
   studentId: string;
   admissionNumber: string;
   fullName: string;
-  issuedItemIds: string[];
+  /** [itemId, quantity] pairs — serialisable form of the issued map. */
+  issued: [string, number][];
 }
 
 interface ClassMatrixProps {
@@ -33,8 +34,8 @@ interface ClassMatrixProps {
  * without a round trip to re-render the page.
  */
 export function ClassMatrix({ students, items, termId, className }: ClassMatrixProps) {
-  const [issued, setIssued] = useState<Record<string, Set<string>>>(() =>
-    Object.fromEntries(students.map((student) => [student.studentId, new Set(student.issuedItemIds)])),
+  const [issued, setIssued] = useState<Record<string, Map<string, number>>>(() =>
+    Object.fromEntries(students.map((student) => [student.studentId, new Map(student.issued)])),
   );
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
 
@@ -45,9 +46,10 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
     let complete = 0;
 
     for (const student of students) {
-      const set = issued[student.studentId] ?? new Set<string>();
-      for (const itemId of set) perItem.set(itemId, (perItem.get(itemId) ?? 0) + 1);
-      if (items.length > 0 && items.every((item) => set.has(item.id))) complete += 1;
+      const held = issued[student.studentId] ?? new Map<string, number>();
+      // Column tallies count students holding the item, not units issued.
+      for (const itemId of held.keys()) perItem.set(itemId, (perItem.get(itemId) ?? 0) + 1);
+      if (items.length > 0 && items.every((item) => held.has(item.id))) complete += 1;
     }
 
     return { perItem, complete };
@@ -124,8 +126,8 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
           </thead>
           <tbody>
             {students.map((student) => {
-              const set = issued[student.studentId] ?? new Set<string>();
-              const count = items.filter((item) => set.has(item.id)).length;
+              const held = issued[student.studentId] ?? new Map<string, number>();
+              const count = items.filter((item) => held.has(item.id)).length;
 
               return (
                 <tr key={student.studentId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
@@ -144,16 +146,29 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
                   </th>
 
                   {items.map((item) => {
-                    const isIssued = set.has(item.id);
+                    const quantity = held.get(item.id);
                     return (
                       <td key={item.id} className="px-3 py-2.5 text-center">
-                        {isIssued ? (
+                        {quantity !== undefined ? (
                           <span
-                            className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-600/20"
-                            title={`${item.name}: issued`}
+                            className="inline-flex items-center justify-center gap-0.5"
+                            title={`${item.name}: issued${quantity > 1 ? ` (${quantity})` : ''}`}
                           >
-                            <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                            <span className="sr-only">Issued</span>
+                            <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
+                              <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                            </span>
+                            {/* A quantity of one is the norm; only call out more. */}
+                            {quantity > 1 && (
+                              <span
+                                aria-hidden="true"
+                                className="text-xs font-semibold tabular-nums text-emerald-700"
+                              >
+                                ×{quantity}
+                              </span>
+                            )}
+                            <span className="sr-only">
+                              Issued{quantity > 1 ? `, quantity ${quantity}` : ''}
+                            </span>
                           </span>
                         ) : (
                           <span className={cn('text-slate-300')} title={`${item.name}: not issued`}>
@@ -176,10 +191,10 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
         student={activeStudent}
         items={items}
         termId={termId}
-        selectedItemIds={activeStudent ? (issued[activeStudent.studentId] ?? new Set()) : new Set()}
+        issued={activeStudent ? (issued[activeStudent.studentId] ?? new Map()) : new Map()}
         onClose={() => setActiveStudentId(null)}
-        onSaved={(studentId, itemIds) =>
-          setIssued((current) => ({ ...current, [studentId]: new Set(itemIds) }))
+        onSaved={(studentId, next) =>
+          setIssued((current) => ({ ...current, [studentId]: next }))
         }
       />
     </>

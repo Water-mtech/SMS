@@ -1,19 +1,22 @@
 -- =============================================================================
--- Preserve issue history for retired stationery items
+-- Per-issue quantities
 -- =============================================================================
--- The student drawer only ever lists ACTIVE items, so the set it submits can
--- only speak for those. The original implementation deleted every issue row not
--- present in that set, which silently erased the record of a retired item the
--- student had already received the moment anyone re-saved their drawer.
+-- stationery_issues has always carried a `quantity` column, but the drawer had
+-- no way to set it: it sent a bare array of item ids and every row landed on the
+-- default of 1. These two functions now speak in {item_id, quantity} pairs so a
+-- clerk can record "3 exercise books" at the moment they tick the item.
 --
--- Scoping the delete to active items makes retirement mean what the UI says it
--- means: the item leaves the matrix, the history of who received it stays.
+-- Both signatures change, so each function is dropped and recreated rather than
+-- replaced -- a plain CREATE OR REPLACE would leave the old overload in place
+-- and PostgREST could still resolve to it.
 -- =============================================================================
 
-create or replace function public.set_student_stationery(
+drop function if exists public.set_student_stationery(uuid, uuid, uuid[]);
+
+create function public.set_student_stationery(
   p_student_id uuid,
   p_term_id uuid,
-  p_item_ids uuid[]
+  p_items jsonb
 )
 returns setof public.stationery_issues
 language plpgsql
@@ -43,12 +46,19 @@ begin
       using errcode = 'no_data_found';
   end if;
 
+  -- Quantities are clamped rather than rejected: the UI already bounds the
+  -- input, and a stray 0 should mean "one", never a constraint violation.
+  -- The payload is parsed inline at each step; it is a handful of rows, and a
+  -- temporary table would add catalog churn on every call under pooling.
+
   -- Every requested item must belong to the student's own section.
   select count(*)
     into v_invalid_count
-    from unnest(coalesce(p_item_ids, '{}'::uuid[])) as requested(item_id)
+    from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as element
     left join public.stationery_items i
-      on i.id = requested.item_id and i.section_id = v_section_id and i.is_active
+      on i.id = (element ->> 'item_id')::uuid
+     and i.section_id = v_section_id
+     and i.is_active
    where i.id is null;
 
   if v_invalid_count > 0 then
@@ -64,12 +74,22 @@ begin
      and si.student_id = p_student_id
      and si.term_id = p_term_id
      and i.is_active
-     and not (si.item_id = any (coalesce(p_item_ids, '{}'::uuid[])));
+     and not exists (
+       select 1
+         from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as element
+        where (element ->> 'item_id')::uuid = si.item_id
+     );
 
-  insert into public.stationery_issues (student_id, item_id, term_id, issued_by)
-  select p_student_id, requested.item_id, p_term_id, v_actor
-    from unnest(coalesce(p_item_ids, '{}'::uuid[])) as requested(item_id)
-  on conflict (student_id, item_id, term_id) do nothing;
+  insert into public.stationery_issues (student_id, item_id, term_id, quantity, issued_by)
+  select
+    p_student_id,
+    (element ->> 'item_id')::uuid,
+    p_term_id,
+    least(greatest(coalesce((element ->> 'quantity')::integer, 1), 1), 999)::smallint,
+    v_actor
+  from jsonb_array_elements(coalesce(p_items, '[]'::jsonb)) as element
+  on conflict (student_id, item_id, term_id) do update
+    set quantity = excluded.quantity;
 
   return query
     select * from public.stationery_issues si
@@ -77,9 +97,11 @@ begin
 end;
 $fn$;
 
--- The matrix must show a retired item a student still holds, otherwise the
--- drawer and the grid would disagree about what that student has received.
-create or replace function public.class_stationery_matrix(
+-- The matrix now carries quantities so a cell can render "check x3" without a
+-- second round trip.
+drop function if exists public.class_stationery_matrix(uuid, uuid);
+
+create function public.class_stationery_matrix(
   p_class_id uuid,
   p_term_id uuid
 )
@@ -87,7 +109,8 @@ returns table (
   student_id uuid,
   admission_number text,
   full_name text,
-  issued_item_ids uuid[]
+  -- {"<item_id>": quantity, ...}
+  issued jsonb
 )
 language sql
 stable
@@ -99,8 +122,8 @@ as $fn$
     s.admission_number,
     public.student_full_name(s),
     coalesce(
-      array_agg(si.item_id order by si.item_id) filter (where si.item_id is not null),
-      '{}'::uuid[]
+      jsonb_object_agg(si.item_id, si.quantity) filter (where si.item_id is not null),
+      '{}'::jsonb
     )
   from public.students s
   left join public.stationery_issues si

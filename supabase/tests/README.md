@@ -40,7 +40,9 @@ items, the one-name-per-section constraint, the same name being free to reuse in
 another section, teachers being read-only over the catalogue, and — most
 importantly — that retiring an item removes it from the matrix without erasing
 the record of students who already received it, even after their drawer is
-re-saved.
+re-saved. It also covers per-issue quantities: they are stored and updated in
+place, and values that are zero, missing or absurd are clamped to 1..999 rather
+than raising a constraint violation.
 
 Every `PASS:` notice is an assertion that held. Any `FAIL:` line, or any error
 other than the ones the scripts deliberately provoke, is a regression.

@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Drawer } from '@/components/ui/overlay';
 import { Alert } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { formatNaira } from '@/lib/format';
 import type { StationeryItem } from '@/lib/types/database';
 import { setStudentStationery } from '@/server/actions/stationery';
 
@@ -16,27 +15,32 @@ interface StudentStationeryDrawerProps {
   student: MatrixStudent | null;
   items: StationeryItem[];
   termId: string;
-  selectedItemIds: Set<string>;
+  /** item id -> quantity currently issued. */
+  issued: Map<string, number>;
   onClose: () => void;
-  onSaved: (studentId: string, itemIds: string[]) => void;
+  onSaved: (studentId: string, issued: Map<string, number>) => void;
 }
+
+const MIN_QUANTITY = 1;
+const MAX_QUANTITY = 999;
 
 /**
  * Slide-over for one student: a "Select All" master checkbox plus one checkbox
- * per item. Nothing is written until Save, so a mis-click is trivially undone
- * by closing the panel.
+ * per item, each with a quantity that defaults to 1 when the item is ticked.
+ *
+ * Nothing is written until Save, so a mis-click is undone by closing the panel.
  */
 export function StudentStationeryDrawer({
   open,
   student,
   items,
   termId,
-  selectedItemIds,
+  issued,
   onClose,
   onSaved,
 }: StudentStationeryDrawerProps) {
   const { toast } = useToast();
-  const [selected, setSelected] = useState<Set<string>>(selectedItemIds);
+  const [selected, setSelected] = useState<Map<string, number>>(issued);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -44,18 +48,18 @@ export function StudentStationeryDrawer({
   // Re-seed the panel whenever it opens for a different student.
   useEffect(() => {
     if (open) {
-      setSelected(new Set(selectedItemIds));
+      setSelected(new Map(issued));
       setError(null);
     }
-    // `selectedItemIds` is a fresh Set on every render of the parent, so keying
-    // off the student id keeps this from looping.
+    // `issued` is a fresh Map on every render of the parent, so keying off the
+    // student id keeps this from looping.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, student?.studentId]);
 
   const allSelected = items.length > 0 && items.every((item) => selected.has(item.id));
   const someSelected = items.some((item) => selected.has(item.id));
 
-  // "Some but not all" is a third state that only the DOM property can express.
+  // "Some but not all" is a third state only the DOM property can express.
   useEffect(() => {
     if (selectAllRef.current) {
       selectAllRef.current.indeterminate = someSelected && !allSelected;
@@ -64,27 +68,57 @@ export function StudentStationeryDrawer({
 
   function toggleItem(itemId: string) {
     setSelected((current) => {
-      const next = new Set(current);
+      const next = new Map(current);
+      // Ticking an item starts it at one; the clerk adjusts from there.
       if (next.has(itemId)) next.delete(itemId);
-      else next.add(itemId);
+      else next.set(itemId, 1);
+      return next;
+    });
+  }
+
+  function setQuantity(itemId: string, raw: string) {
+    setSelected((current) => {
+      if (!current.has(itemId)) return current;
+      const next = new Map(current);
+      const parsed = Number.parseInt(raw, 10);
+      // Keep an empty or half-typed box usable; the value is clamped on save.
+      next.set(itemId, Number.isNaN(parsed) ? MIN_QUANTITY : parsed);
+      return next;
+    });
+  }
+
+  function clampQuantity(itemId: string) {
+    setSelected((current) => {
+      const value = current.get(itemId);
+      if (value === undefined) return current;
+      const next = new Map(current);
+      next.set(itemId, Math.min(Math.max(value, MIN_QUANTITY), MAX_QUANTITY));
       return next;
     });
   }
 
   function toggleAll() {
-    setSelected(allSelected ? new Set() : new Set(items.map((item) => item.id)));
+    setSelected(
+      allSelected
+        ? new Map()
+        : new Map(items.map((item) => [item.id, selected.get(item.id) ?? 1])),
+    );
   }
 
   function save() {
     if (!student) return;
     setError(null);
 
-    const itemIds = [...selected];
+    const payload = [...selected.entries()].map(([itemId, quantity]) => ({
+      itemId,
+      quantity: Math.min(Math.max(quantity || MIN_QUANTITY, MIN_QUANTITY), MAX_QUANTITY),
+    }));
+
     startTransition(async () => {
       const result = await setStudentStationery({
         studentId: student.studentId,
         termId,
-        itemIds,
+        items: payload,
       });
 
       if (!result.ok) {
@@ -92,15 +126,19 @@ export function StudentStationeryDrawer({
         return;
       }
 
-      onSaved(student.studentId, result.data.issuedItemIds);
+      onSaved(
+        student.studentId,
+        new Map(result.data.issued.map((entry) => [entry.itemId, entry.quantity])),
+      );
       toast(`Stationery updated for ${student.fullName}`, 'success');
       onClose();
     });
   }
 
-  const selectedValue = items
-    .filter((item) => selected.has(item.id))
-    .reduce((sum, item) => sum + Number(item.unit_price), 0);
+  const totalUnits = [...selected.values()].reduce(
+    (sum, quantity) => sum + Math.max(quantity || 0, 0),
+    0,
+  );
 
   return (
     <Drawer
@@ -114,7 +152,9 @@ export function StudentStationeryDrawer({
             <p className="font-medium text-slate-900">
               {selected.size} of {items.length} selected
             </p>
-            <p className="text-xs text-slate-500">Value {formatNaira(selectedValue)}</p>
+            <p className="text-xs text-slate-500">
+              {totalUnits} item{totalUnits === 1 ? '' : 's'} in total
+            </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={onClose} disabled={pending}>
@@ -144,34 +184,50 @@ export function StudentStationeryDrawer({
 
         <ul className="space-y-1.5">
           {items.map((item) => {
-            const checked = selected.has(item.id);
+            const quantity = selected.get(item.id);
+            const checked = quantity !== undefined;
+
             return (
               <li key={item.id}>
-                <label
+                <div
                   className={[
-                    'flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-2.5 transition-colors',
-                    checked
-                      ? 'border-brand-200 bg-brand-50'
-                      : 'border-slate-200 bg-white hover:bg-slate-50',
+                    'flex items-center gap-3 rounded-lg border px-3 py-2.5 transition-colors',
+                    checked ? 'border-brand-200 bg-brand-50' : 'border-slate-200 bg-white',
                   ].join(' ')}
                 >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleItem(item.id)}
-                    disabled={pending}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-2 focus:ring-brand-500/40"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-medium text-slate-900">{item.name}</span>
-                    {item.description && (
-                      <span className="block text-xs text-slate-500">{item.description}</span>
-                    )}
-                  </span>
-                  <span className="shrink-0 text-xs font-medium text-slate-500">
-                    {formatNaira(item.unit_price)}
-                  </span>
-                </label>
+                  <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-3">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleItem(item.id)}
+                      disabled={pending}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-brand-600 focus:ring-2 focus:ring-brand-500/40"
+                    />
+                    <span className="truncate text-sm font-medium text-slate-900">{item.name}</span>
+                  </label>
+
+                  {/* The quantity box only appears once the item is ticked. */}
+                  {checked && (
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      <label htmlFor={`qty-${item.id}`} className="text-xs text-slate-500">
+                        Qty
+                      </label>
+                      <input
+                        id={`qty-${item.id}`}
+                        type="number"
+                        inputMode="numeric"
+                        min={MIN_QUANTITY}
+                        max={MAX_QUANTITY}
+                        value={quantity}
+                        disabled={pending}
+                        onChange={(event) => setQuantity(item.id, event.target.value)}
+                        onBlur={() => clampQuantity(item.id)}
+                        aria-label={`Quantity of ${item.name}`}
+                        className="w-16 rounded-md border border-slate-300 px-2 py-1 text-sm tabular-nums text-slate-900 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                      />
+                    </span>
+                  )}
+                </div>
               </li>
             );
           })}
