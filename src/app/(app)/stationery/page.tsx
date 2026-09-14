@@ -1,7 +1,10 @@
 import type { Metadata } from 'next';
+import Link from 'next/link';
+import { PackagePlus } from 'lucide-react';
 
 import { ClassMatrix } from '@/components/stationery/class-matrix';
 import { QuerySelect } from '@/components/filters/query-select';
+import { buttonStyles } from '@/components/ui/button';
 import { Card, PageHeader, Alert } from '@/components/ui/primitives';
 import { formatTerm } from '@/lib/format';
 import {
@@ -33,6 +36,12 @@ export default async function StationeryPage({ searchParams }: PageProps) {
       <PageHeader
         title="Stationery tracking"
         description="Track, per section and class, exactly which items each student has collected this term."
+        action={
+          <Link href="/stationery/items" className={buttonStyles({ variant: 'outline' })}>
+            <PackagePlus className="h-4 w-4" aria-hidden="true" />
+            Manage items
+          </Link>
+        }
       />
 
       <Card className="p-4">

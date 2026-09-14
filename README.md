@@ -14,7 +14,9 @@ year, and collect fees against a ledger that never loses an outstanding balance.
 ### 1. Section-based stationery tracking
 
 - Four sections — **Nursery, Primary, Junior Secondary, Senior Secondary** — each
-  with its own stationery catalogue.
+  with its own stationery catalogue, managed under **Stationery Items**: add,
+  edit, retire and restore the items a section issues. Retiring an item takes it
+  off the matrix while keeping the record of everyone who already received it.
 - Fifteen classes: Pre-Nursery, Nursery 1–3, Primary 1–5, JSS 1–3, SS 1–3.
 - **Class matrix view** — students down the rows, items across the columns. An
   issued item shows a green check (✓); one that has not been collected shows a
@@ -64,7 +66,7 @@ src/
     globals.css             Tailwind layers + the print rules that drive the receipt
   components/
     ui/                     Button, fields, modal/drawer, toasts, primitives
-    stationery/             Class matrix + student drawer
+    stationery/             Class matrix, student drawer, catalogue manager
     students/               Registration form, roster table, import wizard
     fees/                   Ledger table, payment modal, receipt, payment history
     promotions/             Promotion panel

@@ -8,6 +8,7 @@ import {
   BookOpen,
   LayoutDashboard,
   Menu,
+  PackagePlus,
   Receipt,
   Settings,
   Users,
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 const LINKS = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/stationery', label: 'Stationery', icon: BookOpen },
+  { href: '/stationery/items', label: 'Stationery Items', icon: PackagePlus },
   { href: '/students', label: 'Students', icon: Users },
   { href: '/fees', label: 'Fees & Payments', icon: Receipt },
   { href: '/promotions', label: 'Promotions', icon: ArrowUpRight },
@@ -28,6 +30,7 @@ const LINKS = [
 function isActive(pathname: string, href: string) {
   if (href === '/') return pathname === '/';
   if (href === '/fees') return pathname === '/fees' || pathname.startsWith('/fees/receipt');
+  if (href === '/stationery') return pathname === '/stationery';
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
