@@ -7,6 +7,7 @@ import { QuerySelect } from '@/components/filters/query-select';
 import { buttonStyles } from '@/components/ui/button';
 import { Card, PageHeader, Alert } from '@/components/ui/primitives';
 import { formatTerm } from '@/lib/format';
+import { errorMessage } from '@/lib/utils';
 import {
   getClassMatrix,
   getClasses,
@@ -101,10 +102,25 @@ async function MatrixPanel({
   className: string;
   termId: string;
 }) {
-  const [items, matrix] = await Promise.all([
-    getStationeryItems(sectionId),
-    getClassMatrix(classId, termId),
-  ]);
+  // Same reasoning as the catalogue panel: show why the grid is missing rather
+  // than letting the boundary swallow the message in production.
+  let items;
+  let matrix;
+  try {
+    [items, matrix] = await Promise.all([
+      getStationeryItems(sectionId),
+      getClassMatrix(classId, termId),
+    ]);
+  } catch (error) {
+    return (
+      <Card className="p-5">
+        <Alert>
+          <p className="font-medium">The class matrix could not be loaded.</p>
+          <p className="mt-1 break-words font-mono text-xs">{errorMessage(error)}</p>
+        </Alert>
+      </Card>
+    );
+  }
 
   return (
     <Card className="overflow-hidden">

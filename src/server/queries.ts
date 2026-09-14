@@ -24,8 +24,30 @@ import type {
  * list in three different components still issues a single query per request.
  */
 
-function fail(context: string, error: { message: string } | null): never {
-  throw new Error(`${context}: ${error?.message ?? 'unknown error'}`);
+/**
+ * PostgrestError carries `code`, `details` and `hint` alongside `message`, and
+ * those are usually the parts that identify the problem (a missing column, a
+ * relationship PostgREST could not resolve). Dropping them leaves a production
+ * log line that says nothing actionable, so fold them all into the message.
+ */
+interface QueryError {
+  message: string;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+function describeError(error: QueryError | null): string {
+  if (!error) return 'unknown error';
+  const parts = [error.message];
+  if (error.code) parts.push(`(code ${error.code})`);
+  if (error.details) parts.push(`— ${error.details}`);
+  if (error.hint) parts.push(`hint: ${error.hint}`);
+  return parts.join(' ');
+}
+
+function fail(context: string, error: QueryError | null): never {
+  throw new Error(`${context}: ${describeError(error)}`);
 }
 
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {

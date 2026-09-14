@@ -5,6 +5,7 @@ import { ArrowLeft } from 'lucide-react';
 import { QuerySelect } from '@/components/filters/query-select';
 import { CatalogueManager, type CatalogueRow } from '@/components/stationery/catalogue-manager';
 import { Alert, Card, PageHeader } from '@/components/ui/primitives';
+import { errorMessage } from '@/lib/utils';
 import { getCurrentProfile, getSections, getStationeryCatalogue } from '@/server/queries';
 
 export const metadata: Metadata = { title: 'Stationery items' };
@@ -76,7 +77,22 @@ async function CataloguePanel({
   sectionName: string;
   canManage: boolean;
 }) {
-  const items = await getStationeryCatalogue(sectionId);
+  // Caught here rather than left to the error boundary: an uncaught throw is
+  // replaced by a generic string in production, which tells the operator
+  // nothing. Rendering the reason keeps the rest of the page usable.
+  let items;
+  try {
+    items = await getStationeryCatalogue(sectionId);
+  } catch (error) {
+    return (
+      <Card className="p-5">
+        <Alert>
+          <p className="font-medium">The {sectionName} catalogue could not be loaded.</p>
+          <p className="mt-1 break-words font-mono text-xs">{errorMessage(error)}</p>
+        </Alert>
+      </Card>
+    );
+  }
 
   const rows: CatalogueRow[] = items.map((item) => ({
     id: item.id,
