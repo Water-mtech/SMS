@@ -172,10 +172,13 @@ export async function getStationeryCatalogue(sectionId: string): Promise<Catalog
  */
 export async function getClassMatrix(classId: string, termId: string): Promise<MatrixRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc('class_stationery_matrix', {
-    p_class_id: classId,
-    p_term_id: termId,
-  });
+  // Sent as GET, not POST: the function is STABLE, and only idempotent
+  // requests are eligible for the client's transient-failure retries.
+  const { data, error } = await supabase.rpc(
+    'class_stationery_matrix',
+    { p_class_id: classId, p_term_id: termId },
+    { get: true },
+  );
   if (error) fail('Failed to build the class matrix', error);
 
   return (data ?? []).map((row) => ({

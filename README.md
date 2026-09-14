@@ -178,7 +178,20 @@ npm run dev          # http://localhost:3000
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
 npm run lint
+npm test             # retry-wrapper assertions
 ```
+
+### Resilience
+
+Supabase is across the network, so a page issuing several reads will
+occasionally meet a dropped connection or a busy PostgREST worker. All Supabase
+clients share a retrying `fetch` (three attempts, jittered backoff) so one blip
+no longer takes down a whole render.
+
+Only **GET** and **HEAD** are ever replayed. PostgREST sends reads as GET and
+mutating RPCs — recording a payment, promoting a class — as POST; replaying a
+POST whose response was lost would double-apply it, so a POST is attempted
+exactly once, always. `npm test` asserts that property directly.
 
 ---
 
