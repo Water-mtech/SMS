@@ -17,6 +17,18 @@ function useOverlayBehaviour(open: boolean, onClose: () => void) {
   const containerRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
 
+  // Held in a ref so the effect below does not depend on its identity. Callers
+  // routinely pass an inline arrow or a function declared in the component
+  // body, which is a new value on every render; with `onClose` in the
+  // dependency array the effect tore down and re-ran on each keystroke,
+  // restoring focus to the trigger and then grabbing it back for the close
+  // button. The visible symptom was a text field losing focus after one
+  // character, taking the on-screen keyboard with it.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
   useEffect(() => {
     if (!open) return;
 
@@ -25,13 +37,20 @@ function useOverlayBehaviour(open: boolean, onClose: () => void) {
     document.body.style.overflow = 'hidden';
 
     const container = containerRef.current;
-    const first = container?.querySelector<HTMLElement>(FOCUSABLE);
-    (first ?? container)?.focus();
+
+    // Respect focus that is already inside — React has by then honoured any
+    // `autoFocus`, and moving it would land the caret on the close button
+    // instead of the field the user came to fill in.
+    const active = document.activeElement;
+    const alreadyInside = container && active instanceof Node && container.contains(active);
+    if (!alreadyInside) {
+      (container?.querySelector<HTMLElement>(FOCUSABLE) ?? container)?.focus();
+    }
 
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
 
@@ -60,7 +79,8 @@ function useOverlayBehaviour(open: boolean, onClose: () => void) {
       document.body.style.overflow = overflow;
       restoreFocusRef.current?.focus();
     };
-  }, [open, onClose]);
+    // `onClose` is deliberately absent: it is read through onCloseRef.
+  }, [open]);
 
   return containerRef;
 }
