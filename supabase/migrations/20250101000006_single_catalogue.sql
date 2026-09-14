@@ -156,3 +156,9 @@ begin
      where si.student_id = p_student_id and si.term_id = p_term_id;
 end;
 $fn$;
+
+-- 6. Dropping a column changes the shape PostgREST exposes. Supabase normally
+--    reloads its schema cache from a DDL event trigger; this makes it explicit
+--    so the catalogue cannot be served from a cache that still expects
+--    section_id.
+notify pgrst, 'reload schema';
