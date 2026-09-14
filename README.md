@@ -14,7 +14,9 @@ year, and collect fees against a ledger that never loses an outstanding balance.
 ### 1. Section-based stationery tracking
 
 - Four sections — **Nursery, Primary, Junior Secondary, Senior Secondary** — each
-  with its own stationery catalogue.
+  with its own stationery catalogue, managed under **Stationery Items**: add,
+  edit, retire and restore the items a section issues. Retiring an item takes it
+  off the matrix while keeping the record of everyone who already received it.
 - Fifteen classes: Pre-Nursery, Nursery 1–3, Primary 1–5, JSS 1–3, SS 1–3.
 - **Class matrix view** — students down the rows, items across the columns. An
   issued item shows a green check (✓); one that has not been collected shows a
@@ -64,7 +66,7 @@ src/
     globals.css             Tailwind layers + the print rules that drive the receipt
   components/
     ui/                     Button, fields, modal/drawer, toasts, primitives
-    stationery/             Class matrix + student drawer
+    stationery/             Class matrix, student drawer, catalogue manager
     students/               Registration form, roster table, import wizard
     fees/                   Ledger table, payment modal, receipt, payment history
     promotions/             Promotion panel
@@ -145,13 +147,20 @@ cp .env.example .env.local
 
 ### 3. Create staff accounts
 
-Add users in the Supabase dashboard. A `profiles` row is created automatically by
-the `on_auth_user_created` trigger with the `teacher` role; promote the first
-account to `admin`:
+Add users in the Supabase dashboard (Authentication → Users → Add user). A
+`profiles` row is created automatically by the `on_auth_user_created` trigger
+with the `teacher` role; promote the first account to `admin`:
 
 ```sql
 update public.profiles set role = 'admin' where email = 'you@school.edu.ng';
 ```
+
+To seed the very first administrator on a fresh project — or to recover a
+locked-out one — fill in the three variables at the top of
+[`supabase/scripts/create_admin.sql`](supabase/scripts/create_admin.sql) and run
+it in the SQL editor. It creates the `auth.users` row, the matching
+`auth.identities` row that email sign-in requires, and an admin profile, and is
+safe to re-run. Never commit that file with a real password in it.
 
 | Role | Can do |
 | --- | --- |

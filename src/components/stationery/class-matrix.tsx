@@ -1,7 +1,10 @@
 'use client';
 
+import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { Check, PackageOpen } from 'lucide-react';
+
+import { buttonStyles } from '@/components/ui/button';
 
 import { StudentStationeryDrawer } from '@/components/stationery/student-drawer';
 import { Badge, EmptyState } from '@/components/ui/primitives';
@@ -55,7 +58,12 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
       <EmptyState
         icon={<PackageOpen className="h-8 w-8" />}
         title="No stationery items for this section"
-        description="Add items to this section before tracking what each student has received."
+        description="The matrix draws one column per item, so there is nothing to track yet. Set up this section's catalogue first."
+        action={
+          <Link href="/stationery/items" className={buttonStyles()}>
+            Set up stationery items
+          </Link>
+        }
       />
     );
   }
@@ -66,6 +74,11 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
         icon={<PackageOpen className="h-8 w-8" />}
         title={`No active students in ${className}`}
         description="Register students or import a roster to start tracking stationery."
+        action={
+          <Link href="/students/import" className={buttonStyles({ variant: 'outline' })}>
+            Import a roster
+          </Link>
+        }
       />
     );
   }

@@ -99,6 +99,51 @@ export const getStationeryItems = cache(async (sectionId: string): Promise<Stati
   return data ?? [];
 });
 
+export interface CatalogueItem extends StationeryItem {
+  /** How many issue records reference this item, across all terms. */
+  issuedCount: number;
+}
+
+/**
+ * A section's full stationery catalogue, retired items included, with a count
+ * of how many times each item has been issued.
+ *
+ * The counts come from one `in` query over the section's item ids and are
+ * tallied here: PostgREST has no GROUP BY, and a catalogue is a few dozen items
+ * at most, so this stays a single round trip either way.
+ */
+export async function getStationeryCatalogue(sectionId: string): Promise<CatalogueItem[]> {
+  const supabase = await createClient();
+
+  const { data: items, error } = await supabase
+    .from('stationery_items')
+    .select('*')
+    .eq('section_id', sectionId)
+    .order('is_active', { ascending: false })
+    .order('display_order')
+    .order('name');
+
+  if (error) fail('Failed to load the stationery catalogue', error);
+  if (!items || items.length === 0) return [];
+
+  const { data: issues, error: issuesError } = await supabase
+    .from('stationery_issues')
+    .select('item_id')
+    .in(
+      'item_id',
+      items.map((item) => item.id),
+    );
+
+  if (issuesError) fail('Failed to count stationery issues', issuesError);
+
+  const counts = new Map<string, number>();
+  for (const issue of issues ?? []) {
+    counts.set(issue.item_id, (counts.get(issue.item_id) ?? 0) + 1);
+  }
+
+  return items.map((item) => ({ ...item, issuedCount: counts.get(item.id) ?? 0 }));
+}
+
 /**
  * The class matrix: one RPC call returns every student in the class with the
  * ids of the items they have already been issued this term.

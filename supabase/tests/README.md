@@ -22,6 +22,7 @@ psql -h /tmp -p 55432 -U postgres -c "
 
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/01_business_logic.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/02_row_level_security.sql
+psql -h /tmp -p 55432 -U postgres -f supabase/tests/03_stationery_catalogue.sql
 ```
 
 `01_business_logic.sql` covers the bulk importer, the dual ledger, part payments
@@ -33,6 +34,13 @@ graduation from the terminal class, and archive / restore.
 `02_row_level_security.sql` asserts the role boundaries: a teacher may read the
 roster and issue stationery but may not create students or take payments; a
 bursar may take payments but may not run promotions.
+
+`03_stationery_catalogue.sql` covers catalogue management: adding and editing
+items, the one-name-per-section constraint, the same name being free to reuse in
+another section, teachers being read-only over the catalogue, and — most
+importantly — that retiring an item removes it from the matrix without erasing
+the record of students who already received it, even after their drawer is
+re-saved.
 
 Every `PASS:` notice is an assertion that held. Any `FAIL:` line, or any error
 other than the ones the scripts deliberately provoke, is a regression.

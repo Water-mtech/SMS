@@ -44,20 +44,34 @@ export async function setStudentStationery(
 }
 
 const itemSchema = z.object({
-  sectionId: z.string().uuid(),
+  sectionId: z.string().uuid('Select a section'),
   name: z.string().trim().min(1, 'Item name is required').max(120),
   description: z.string().trim().max(300).optional(),
-  unitPrice: z.coerce.number().min(0, 'Price cannot be negative').default(0),
-  displayOrder: z.coerce.number().int().min(0).default(0),
+  unitPrice: z.coerce.number().min(0, 'Price cannot be negative').max(10_000_000).default(0),
+  displayOrder: z.coerce.number().int().min(0).max(999).default(0),
 });
 
+/** Every screen that reads the catalogue, refreshed after a catalogue write. */
+function revalidateCatalogue() {
+  revalidatePath('/stationery');
+  revalidatePath('/stationery/items');
+}
+
+function text(formData: FormData, key: string): string | undefined {
+  const value = formData.get(key);
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed === '' ? undefined : trimmed;
+}
+
+/** Add an item to a section's catalogue. */
 export async function createStationeryItem(formData: FormData): Promise<ActionResult> {
   const parsed = itemSchema.safeParse({
-    sectionId: formData.get('sectionId'),
-    name: formData.get('name'),
-    description: formData.get('description') || undefined,
-    unitPrice: formData.get('unitPrice') ?? 0,
-    displayOrder: formData.get('displayOrder') ?? 0,
+    sectionId: text(formData, 'sectionId'),
+    name: text(formData, 'name'),
+    description: text(formData, 'description'),
+    unitPrice: text(formData, 'unitPrice') ?? 0,
+    displayOrder: text(formData, 'displayOrder') ?? 0,
   });
 
   if (!parsed.success) {
@@ -74,30 +88,94 @@ export async function createStationeryItem(formData: FormData): Promise<ActionRe
       display_order: parsed.data.displayOrder,
     });
 
-    if (error) return failure(fromPostgrestError(error));
+    if (error) {
+      // stationery_items_section_name_key: one name per section.
+      if (error.code === '23505') {
+        return failure('That section already has an item with this name', {
+          name: 'Already in this section',
+        });
+      }
+      return failure(fromPostgrestError(error));
+    }
 
-    revalidatePath('/stationery');
-    revalidatePath('/settings');
+    revalidateCatalogue();
     return ok();
   } catch (error) {
     return failure(errorMessage(error, 'Could not create the stationery item'));
   }
 }
 
-export async function deactivateStationeryItem(itemId: string): Promise<ActionResult> {
+const updateItemSchema = itemSchema.omit({ sectionId: true }).extend({
+  itemId: z.string().uuid(),
+});
+
+/** Edit an existing item. Its section is fixed: moving it would orphan the
+ *  issue records of students in the section it came from. */
+export async function updateStationeryItem(formData: FormData): Promise<ActionResult> {
+  const parsed = updateItemSchema.safeParse({
+    itemId: text(formData, 'itemId'),
+    name: text(formData, 'name'),
+    description: text(formData, 'description'),
+    unitPrice: text(formData, 'unitPrice') ?? 0,
+    displayOrder: text(formData, 'displayOrder') ?? 0,
+  });
+
+  if (!parsed.success) {
+    return failure('Please correct the highlighted fields', fieldErrorsOf(parsed.error));
+  }
+
   try {
     const supabase = await createClient();
     const { error } = await supabase
       .from('stationery_items')
-      .update({ is_active: false })
+      .update({
+        name: parsed.data.name,
+        description: parsed.data.description ?? null,
+        unit_price: parsed.data.unitPrice,
+        display_order: parsed.data.displayOrder,
+      })
+      .eq('id', parsed.data.itemId);
+
+    if (error) {
+      if (error.code === '23505') {
+        return failure('That section already has an item with this name', {
+          name: 'Already in this section',
+        });
+      }
+      return failure(fromPostgrestError(error));
+    }
+
+    revalidateCatalogue();
+    return ok();
+  } catch (error) {
+    return failure(errorMessage(error, 'Could not update the stationery item'));
+  }
+}
+
+/**
+ * Retire or restore an item.
+ *
+ * Items are never deleted: a retired item drops out of the matrix and the
+ * student drawer, but the record of who was already issued it survives.
+ */
+export async function setStationeryItemActive(
+  itemId: string,
+  isActive: boolean,
+): Promise<ActionResult> {
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase
+      .from('stationery_items')
+      .update({ is_active: isActive })
       .eq('id', itemId);
 
     if (error) return failure(fromPostgrestError(error));
 
-    revalidatePath('/stationery');
-    revalidatePath('/settings');
+    revalidateCatalogue();
     return ok();
   } catch (error) {
-    return failure(errorMessage(error, 'Could not retire the stationery item'));
+    return failure(
+      errorMessage(error, isActive ? 'Could not restore the item' : 'Could not retire the item'),
+    );
   }
 }
