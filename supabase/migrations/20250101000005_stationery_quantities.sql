@@ -22,7 +22,7 @@ returns setof public.stationery_issues
 language plpgsql
 security invoker
 set search_path = public
-as $$
+as $fn$
 declare
   v_actor uuid := auth.uid();
   v_section_id uuid;
@@ -95,7 +95,7 @@ begin
     select * from public.stationery_issues si
      where si.student_id = p_student_id and si.term_id = p_term_id;
 end;
-$$;
+$fn$;
 
 -- The matrix now carries quantities so a cell can render "check x3" without a
 -- second round trip.
@@ -116,7 +116,7 @@ language sql
 stable
 security invoker
 set search_path = public
-as $$
+as $fn$
   select
     s.id,
     s.admission_number,
@@ -133,4 +133,4 @@ as $$
     and s.status = 'active'
   group by s.id
   order by s.last_name, s.first_name;
-$$;
+$fn$;
