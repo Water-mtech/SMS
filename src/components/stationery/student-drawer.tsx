@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Drawer } from '@/components/ui/overlay';
 import { Alert } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { MIN_QUANTITY, commitQuantity, sanitiseQuantityInput } from '@/lib/quantity';
 import type { StationeryItem } from '@/lib/types/database';
 import { setStudentStationery } from '@/server/actions/stationery';
 
@@ -20,9 +21,6 @@ interface StudentStationeryDrawerProps {
   onClose: () => void;
   onSaved: (studentId: string, issued: Map<string, number>) => void;
 }
-
-const MIN_QUANTITY = 1;
-const MAX_QUANTITY = 999;
 
 /**
  * Slide-over for one student: a "Select All" master checkbox plus one checkbox
@@ -40,7 +38,11 @@ export function StudentStationeryDrawer({
   onSaved,
 }: StudentStationeryDrawerProps) {
   const { toast } = useToast();
-  const [selected, setSelected] = useState<Map<string, number>>(issued);
+  // Values are the raw text in each box, not numbers: an empty string is a
+  // valid in-progress state and only becomes a quantity when committed.
+  const [selected, setSelected] = useState<Map<string, string>>(() =>
+    new Map([...issued].map(([itemId, quantity]) => [itemId, String(quantity)])),
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const selectAllRef = useRef<HTMLInputElement>(null);
@@ -48,7 +50,7 @@ export function StudentStationeryDrawer({
   // Re-seed the panel whenever it opens for a different student.
   useEffect(() => {
     if (open) {
-      setSelected(new Map(issued));
+      setSelected(new Map([...issued].map(([itemId, quantity]) => [itemId, String(quantity)])));
       setError(null);
     }
     // `issued` is a fresh Map on every render of the parent, so keying off the
@@ -71,7 +73,7 @@ export function StudentStationeryDrawer({
       const next = new Map(current);
       // Ticking an item starts it at one; the clerk adjusts from there.
       if (next.has(itemId)) next.delete(itemId);
-      else next.set(itemId, 1);
+      else next.set(itemId, String(MIN_QUANTITY));
       return next;
     });
   }
@@ -80,19 +82,19 @@ export function StudentStationeryDrawer({
     setSelected((current) => {
       if (!current.has(itemId)) return current;
       const next = new Map(current);
-      const parsed = Number.parseInt(raw, 10);
-      // Keep an empty or half-typed box usable; the value is clamped on save.
-      next.set(itemId, Number.isNaN(parsed) ? MIN_QUANTITY : parsed);
+      // Stored verbatim, empty included, so the box can be cleared and retyped.
+      next.set(itemId, sanitiseQuantityInput(raw));
       return next;
     });
   }
 
+  /** On blur an empty or out-of-range box settles on the value that will save. */
   function clampQuantity(itemId: string) {
     setSelected((current) => {
       const value = current.get(itemId);
       if (value === undefined) return current;
       const next = new Map(current);
-      next.set(itemId, Math.min(Math.max(value, MIN_QUANTITY), MAX_QUANTITY));
+      next.set(itemId, String(commitQuantity(value)));
       return next;
     });
   }
@@ -109,9 +111,9 @@ export function StudentStationeryDrawer({
     if (!student) return;
     setError(null);
 
-    const payload = [...selected.entries()].map(([itemId, quantity]) => ({
+    const payload = [...selected.entries()].map(([itemId, raw]) => ({
       itemId,
-      quantity: Math.min(Math.max(quantity || MIN_QUANTITY, MIN_QUANTITY), MAX_QUANTITY),
+      quantity: commitQuantity(raw),
     }));
 
     startTransition(async () => {
@@ -136,7 +138,7 @@ export function StudentStationeryDrawer({
   }
 
   const totalUnits = [...selected.values()].reduce(
-    (sum, quantity) => sum + Math.max(quantity || 0, 0),
+    (sum, raw) => sum + commitQuantity(raw),
     0,
   );
 
@@ -214,10 +216,10 @@ export function StudentStationeryDrawer({
                       </label>
                       <input
                         id={`qty-${item.id}`}
-                        type="number"
+                        type="text"
                         inputMode="numeric"
-                        min={MIN_QUANTITY}
-                        max={MAX_QUANTITY}
+                        pattern="[0-9]*"
+                        maxLength={3}
                         value={quantity}
                         disabled={pending}
                         onChange={(event) => setQuantity(item.id, event.target.value)}
