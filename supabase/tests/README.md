@@ -36,11 +36,10 @@ roster and issue stationery but may not create students or take payments; a
 bursar may take payments but may not run promotions.
 
 `03_stationery_catalogue.sql` covers catalogue management: adding and editing
-items, the one-name-per-section constraint, the same name being free to reuse in
-another section, teachers being read-only over the catalogue, and — most
-importantly — that retiring an item removes it from the matrix without erasing
-the record of students who already received it, even after their drawer is
-re-saved. It also covers per-issue quantities: they are stored and updated in
+items, names being unique across the whole catalogue (case-insensitively),
+teachers being read-only over the catalogue, and — most importantly — that
+retiring an item removes it from the matrix without erasing the record of
+students who already received it, even after their drawer is re-saved. It also covers per-issue quantities: they are stored and updated in
 place, and values that are zero, missing or absurd are clamped to 1..999 rather
 than raising a constraint violation.
 

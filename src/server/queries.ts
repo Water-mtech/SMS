@@ -24,8 +24,30 @@ import type {
  * list in three different components still issues a single query per request.
  */
 
-function fail(context: string, error: { message: string } | null): never {
-  throw new Error(`${context}: ${error?.message ?? 'unknown error'}`);
+/**
+ * PostgrestError carries `code`, `details` and `hint` alongside `message`, and
+ * those are usually the parts that identify the problem (a missing column, a
+ * relationship PostgREST could not resolve). Dropping them leaves a production
+ * log line that says nothing actionable, so fold them all into the message.
+ */
+interface QueryError {
+  message: string;
+  code?: string | null;
+  details?: string | null;
+  hint?: string | null;
+}
+
+function describeError(error: QueryError | null): string {
+  if (!error) return 'unknown error';
+  const parts = [error.message];
+  if (error.code) parts.push(`(code ${error.code})`);
+  if (error.details) parts.push(`— ${error.details}`);
+  if (error.hint) parts.push(`hint: ${error.hint}`);
+  return parts.join(' ');
+}
+
+function fail(context: string, error: QueryError | null): never {
+  throw new Error(`${context}: ${describeError(error)}`);
 }
 
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
@@ -86,12 +108,12 @@ export async function resolveTerm(termId?: string): Promise<Term | null> {
   return data ?? getCurrentTerm();
 }
 
-export const getStationeryItems = cache(async (sectionId: string): Promise<StationeryItem[]> => {
+/** The active catalogue. One shared list, offered to every student. */
+export const getStationeryItems = cache(async (): Promise<StationeryItem[]> => {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('stationery_items')
     .select('*')
-    .eq('section_id', sectionId)
     .eq('is_active', true)
     .order('display_order')
     .order('name');
@@ -105,20 +127,19 @@ export interface CatalogueItem extends StationeryItem {
 }
 
 /**
- * A section's full stationery catalogue, retired items included, with a count
- * of how many times each item has been issued.
+ * The full catalogue, retired items included, with a count of how many times
+ * each item has been issued.
  *
- * The counts come from one `in` query over the section's item ids and are
- * tallied here: PostgREST has no GROUP BY, and a catalogue is a few dozen items
- * at most, so this stays a single round trip either way.
+ * The counts come from one `in` query over the item ids and are tallied here:
+ * PostgREST has no GROUP BY, and a catalogue is a few dozen items at most, so
+ * this stays a single round trip either way.
  */
-export async function getStationeryCatalogue(sectionId: string): Promise<CatalogueItem[]> {
+export async function getStationeryCatalogue(): Promise<CatalogueItem[]> {
   const supabase = await createClient();
 
   const { data: items, error } = await supabase
     .from('stationery_items')
     .select('*')
-    .eq('section_id', sectionId)
     .order('is_active', { ascending: false })
     .order('display_order')
     .order('name');
@@ -150,10 +171,13 @@ export async function getStationeryCatalogue(sectionId: string): Promise<Catalog
  */
 export async function getClassMatrix(classId: string, termId: string): Promise<MatrixRow[]> {
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc('class_stationery_matrix', {
-    p_class_id: classId,
-    p_term_id: termId,
-  });
+  // Sent as GET, not POST: the function is STABLE, and only idempotent
+  // requests are eligible for the client's transient-failure retries.
+  const { data, error } = await supabase.rpc(
+    'class_stationery_matrix',
+    { p_class_id: classId, p_term_id: termId },
+    { get: true },
+  );
   if (error) fail('Failed to build the class matrix', error);
 
   return (data ?? []).map((row) => ({

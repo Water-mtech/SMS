@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { publicEnv } from '@/lib/env';
+import { supabaseFetch } from '@/lib/supabase/fetch';
 import type { Database } from '@/lib/types/database';
 
 const PUBLIC_ROUTES = ['/login', '/auth'];
@@ -18,6 +19,7 @@ export async function updateSession(request: NextRequest) {
     publicEnv.supabaseUrl,
     publicEnv.supabaseKey,
     {
+      global: { fetch: supabaseFetch },
       cookies: {
         getAll() {
           return request.cookies.getAll();

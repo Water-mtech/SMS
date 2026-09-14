@@ -24,6 +24,14 @@ export default function AppError({
       </p>
       <div className="mt-4 space-y-4">
         <Alert>{error.message}</Alert>
+        {/* Production replaces the message with a generic string but keeps the
+            digest, which is the only way to match this failure to its server
+            log line. Show it rather than making the operator hunt for it. */}
+        {error.digest && (
+          <p className="text-xs text-slate-500">
+            Reference: <code className="font-mono text-slate-700">{error.digest}</code>
+          </p>
+        )}
         <Button onClick={reset}>Try again</Button>
       </div>
     </Card>

@@ -4,6 +4,7 @@ import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
 import { publicEnv } from '@/lib/env';
+import { supabaseFetch } from '@/lib/supabase/fetch';
 import type { Database } from '@/lib/types/database';
 
 /**
@@ -17,6 +18,9 @@ export async function createClient() {
     publicEnv.supabaseUrl,
     publicEnv.supabaseKey,
     {
+      // Transient network failures are retried rather than taking down the
+      // whole server render.
+      global: { fetch: supabaseFetch },
       cookies: {
         getAll() {
           return cookieStore.getAll();

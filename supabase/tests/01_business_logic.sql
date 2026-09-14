@@ -77,31 +77,27 @@ select count(*) as issued_after_select_all from public.set_student_stationery(
   (select id from public.students where admission_number = 'BFS/001'),
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1))
-     from public.stationery_items i
-     join public.sections s on s.id = i.section_id where s.slug = 'primary'));
+     from public.stationery_items i where i.is_active));
 
 select count(*) as issued_after_partial from public.set_student_stationery(
   (select id from public.students where admission_number = 'BFS/001'),
   (select id from public.terms where is_current),
   (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1)) from (
      select i.id from public.stationery_items i
-       join public.sections s on s.id = i.section_id
-      where s.slug = 'primary' order by i.display_order limit 2) i));
+      where i.is_active order by i.display_order, i.name limit 2) i));
 
-\echo '=== 9. Cross-section item must be rejected ==='
-do $$
+\echo '=== 9. Unknown or retired items must be rejected ==='
+do $t$
 begin
   perform public.set_student_stationery(
     (select id from public.students where admission_number = 'BFS/001'),
     (select id from public.terms where is_current),
-    jsonb_build_array(jsonb_build_object('item_id',
-      (select i.id from public.stationery_items i
-         join public.sections s on s.id = i.section_id
-        where s.slug = 'senior-secondary' limit 1), 'quantity', 1)));
-  raise exception 'FAIL: cross-section item accepted';
+    jsonb_build_array(jsonb_build_object(
+      'item_id', '00000000-0000-0000-0000-0000000000ff', 'quantity', 1)));
+  raise exception 'FAIL: unknown item accepted';
 exception when check_violation then
-  raise notice 'PASS: cross-section item rejected';
-end $$;
+  raise notice 'PASS: unknown item rejected';
+end $t$;
 
 \echo '=== 10. Matrix RPC ==='
 select admission_number, full_name, (select count(*) from jsonb_object_keys(issued)) as issued

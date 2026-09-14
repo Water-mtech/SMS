@@ -59,8 +59,8 @@ export function ClassMatrix({ students, items, termId, className }: ClassMatrixP
     return (
       <EmptyState
         icon={<PackageOpen className="h-8 w-8" />}
-        title="No stationery items for this section"
-        description="The matrix draws one column per item, so there is nothing to track yet. Set up this section's catalogue first."
+        title="No stationery items in the catalogue"
+        description="The matrix draws one column per item, so there is nothing to track yet. Add the items the school issues."
         action={
           <Link href="/stationery/items" className={buttonStyles()}>
             Set up stationery items

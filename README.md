@@ -13,12 +13,17 @@ year, and collect fees against a ledger that never loses an outstanding balance.
 
 ### 1. Section-based stationery tracking
 
-- Four sections — **Nursery, Primary, Junior Secondary, Senior Secondary** — each
-  with its own stationery catalogue, managed under **Stationery Items**: add,
-  edit, retire and restore the items a section issues. Retiring an item takes it
-  off the matrix while keeping the record of everyone who already received it.
-- Fifteen classes: Pre-Nursery, Nursery 1–3, Primary 1–5, JSS 1–3, SS 1–3.
-- **Class matrix view** — students down the rows, items across the columns. An
+- **One shared catalogue** for the whole school, managed under **Stationery
+  Items**: add, edit, retire and restore. Every item is offered for every
+  student regardless of class, and staff tick the ones that apply — a uniform
+  goes to everyone, a textbook only to the classes that need it. Item names are
+  unique case-insensitively. Retiring an item takes it off the matrix while
+  keeping the record of everyone who already received it.
+- Four sections — **Nursery, Primary, Junior Secondary, Senior Secondary** —
+  group the fifteen classes: Pre-Nursery, Nursery 1–3, Primary 1–5, JSS 1–3,
+  SS 1–3.
+- **Class matrix view** — students down the rows, the whole catalogue across the
+  columns. An
   issued item shows a green check (✓), with a `×N` beside it when more than one
   was issued; an item not yet collected shows a dash (—). Per-column tallies show
   how far each item has been distributed.
@@ -178,7 +183,20 @@ npm run dev          # http://localhost:3000
 npm run build        # production build
 npm run typecheck    # tsc --noEmit
 npm run lint
+npm test             # retry-wrapper assertions
 ```
+
+### Resilience
+
+Supabase is across the network, so a page issuing several reads will
+occasionally meet a dropped connection or a busy PostgREST worker. All Supabase
+clients share a retrying `fetch` (three attempts, jittered backoff) so one blip
+no longer takes down a whole render.
+
+Only **GET** and **HEAD** are ever replayed. PostgREST sends reads as GET and
+mutating RPCs — recording a payment, promoting a class — as POST; replaying a
+POST whose response was lost would double-apply it, so a POST is attempted
+exactly once, always. `npm test` asserts that property directly.
 
 ---
 
