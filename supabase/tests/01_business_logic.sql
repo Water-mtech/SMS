@@ -76,13 +76,14 @@ select total_paid, balance from public.fee_accounts
 select count(*) as issued_after_select_all from public.set_student_stationery(
   (select id from public.students where admission_number = 'BFS/001'),
   (select id from public.terms where is_current),
-  (select array_agg(i.id) from public.stationery_items i
+  (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1))
+     from public.stationery_items i
      join public.sections s on s.id = i.section_id where s.slug = 'primary'));
 
 select count(*) as issued_after_partial from public.set_student_stationery(
   (select id from public.students where admission_number = 'BFS/001'),
   (select id from public.terms where is_current),
-  (select array_agg(i.id) from (
+  (select jsonb_agg(jsonb_build_object('item_id', i.id, 'quantity', 1)) from (
      select i.id from public.stationery_items i
        join public.sections s on s.id = i.section_id
       where s.slug = 'primary' order by i.display_order limit 2) i));
@@ -93,16 +94,17 @@ begin
   perform public.set_student_stationery(
     (select id from public.students where admission_number = 'BFS/001'),
     (select id from public.terms where is_current),
-    array[(select i.id from public.stationery_items i
-             join public.sections s on s.id = i.section_id
-            where s.slug = 'senior-secondary' limit 1)]);
+    jsonb_build_array(jsonb_build_object('item_id',
+      (select i.id from public.stationery_items i
+         join public.sections s on s.id = i.section_id
+        where s.slug = 'senior-secondary' limit 1), 'quantity', 1)));
   raise exception 'FAIL: cross-section item accepted';
 exception when check_violation then
   raise notice 'PASS: cross-section item rejected';
 end $$;
 
 \echo '=== 10. Matrix RPC ==='
-select admission_number, full_name, array_length(issued_item_ids, 1) as issued
+select admission_number, full_name, (select count(*) from jsonb_object_keys(issued)) as issued
   from public.class_stationery_matrix(
     (select id from public.classes where slug = 'primary-1'),
     (select id from public.terms where is_current))

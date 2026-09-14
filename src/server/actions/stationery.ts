@@ -10,19 +10,25 @@ import { failure, fieldErrorsOf, fromPostgrestError, ok, type ActionResult } fro
 const setIssuesSchema = z.object({
   studentId: z.string().uuid(),
   termId: z.string().uuid(),
-  itemIds: z.array(z.string().uuid()),
+  items: z.array(
+    z.object({
+      itemId: z.string().uuid(),
+      quantity: z.coerce.number().int().min(1).max(999).default(1),
+    }),
+  ),
 });
 
 /**
- * Replace the set of items a student has been issued this term.
+ * Replace the set of items a student has been issued this term, with the
+ * quantity of each.
  *
  * Both "Select All" and single-checkbox toggles call this with the full desired
  * set, so the drawer never has to reason about diffs — the database does it in
  * one transaction.
  */
 export async function setStudentStationery(
-  input: z.infer<typeof setIssuesSchema>,
-): Promise<ActionResult<{ issuedItemIds: string[] }>> {
+  input: z.input<typeof setIssuesSchema>,
+): Promise<ActionResult<{ issued: { itemId: string; quantity: number }[] }>> {
   const parsed = setIssuesSchema.safeParse(input);
   if (!parsed.success) return failure('Invalid stationery selection');
 
@@ -31,13 +37,21 @@ export async function setStudentStationery(
     const { data, error } = await supabase.rpc('set_student_stationery', {
       p_student_id: parsed.data.studentId,
       p_term_id: parsed.data.termId,
-      p_item_ids: parsed.data.itemIds,
+      p_items: parsed.data.items.map((item) => ({
+        item_id: item.itemId,
+        quantity: item.quantity,
+      })),
     });
 
     if (error) return failure(fromPostgrestError(error));
 
     revalidatePath('/stationery');
-    return ok({ issuedItemIds: (data ?? []).map((issue) => issue.item_id) });
+    return ok({
+      issued: (data ?? []).map((issue) => ({
+        itemId: issue.item_id,
+        quantity: issue.quantity,
+      })),
+    });
   } catch (error) {
     return failure(errorMessage(error, 'Could not save the stationery selection'));
   }
@@ -46,8 +60,6 @@ export async function setStudentStationery(
 const itemSchema = z.object({
   sectionId: z.string().uuid('Select a section'),
   name: z.string().trim().min(1, 'Item name is required').max(120),
-  description: z.string().trim().max(300).optional(),
-  unitPrice: z.coerce.number().min(0, 'Price cannot be negative').max(10_000_000).default(0),
   displayOrder: z.coerce.number().int().min(0).max(999).default(0),
 });
 
@@ -69,8 +81,6 @@ export async function createStationeryItem(formData: FormData): Promise<ActionRe
   const parsed = itemSchema.safeParse({
     sectionId: text(formData, 'sectionId'),
     name: text(formData, 'name'),
-    description: text(formData, 'description'),
-    unitPrice: text(formData, 'unitPrice') ?? 0,
     displayOrder: text(formData, 'displayOrder') ?? 0,
   });
 
@@ -83,8 +93,6 @@ export async function createStationeryItem(formData: FormData): Promise<ActionRe
     const { error } = await supabase.from('stationery_items').insert({
       section_id: parsed.data.sectionId,
       name: parsed.data.name,
-      description: parsed.data.description ?? null,
-      unit_price: parsed.data.unitPrice,
       display_order: parsed.data.displayOrder,
     });
 
@@ -115,8 +123,6 @@ export async function updateStationeryItem(formData: FormData): Promise<ActionRe
   const parsed = updateItemSchema.safeParse({
     itemId: text(formData, 'itemId'),
     name: text(formData, 'name'),
-    description: text(formData, 'description'),
-    unitPrice: text(formData, 'unitPrice') ?? 0,
     displayOrder: text(formData, 'displayOrder') ?? 0,
   });
 
@@ -130,8 +136,6 @@ export async function updateStationeryItem(formData: FormData): Promise<ActionRe
       .from('stationery_items')
       .update({
         name: parsed.data.name,
-        description: parsed.data.description ?? null,
-        unit_price: parsed.data.unitPrice,
         display_order: parsed.data.displayOrder,
       })
       .eq('id', parsed.data.itemId);

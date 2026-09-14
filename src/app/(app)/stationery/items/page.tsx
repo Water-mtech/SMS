@@ -81,8 +81,6 @@ async function CataloguePanel({
   const rows: CatalogueRow[] = items.map((item) => ({
     id: item.id,
     name: item.name,
-    description: item.description,
-    unitPrice: Number(item.unit_price),
     displayOrder: item.display_order,
     isActive: item.is_active,
     issuedCount: item.issuedCount,

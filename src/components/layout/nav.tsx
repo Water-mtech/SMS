@@ -27,6 +27,13 @@ const LINKS = [
   { href: '/fees/structures', label: 'Fee Structures', icon: Settings },
 ] as const;
 
+/**
+ * The sidebar is a solid brand-green panel, so every control inside it is
+ * styled for a dark ground: light text, a lighter green for the active link,
+ * and a white focus ring that stays visible against the green.
+ */
+const PANEL_CLASSES = 'bg-brand-700 text-white';
+
 function isActive(pathname: string, href: string) {
   if (href === '/') return pathname === '/';
   if (href === '/fees') return pathname === '/fees' || pathname.startsWith('/fees/receipt');
@@ -49,10 +56,10 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             aria-current={active ? 'page' : undefined}
             className={cn(
               'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500',
+              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white',
               active
-                ? 'bg-brand-50 text-brand-700'
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                ? 'bg-brand-500 text-white shadow-sm'
+                : 'text-brand-100 hover:bg-brand-600 hover:text-white',
             )}
           >
             <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -66,7 +73,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 
 export function DesktopNav() {
   return (
-    <div className="hidden w-60 shrink-0 border-r border-slate-200 bg-white lg:block print:hidden">
+    <div className={cn('hidden w-60 shrink-0 lg:block print:hidden', PANEL_CLASSES)}>
       <div className="sticky top-0 flex h-screen flex-col gap-6 px-4 py-6">
         <BrandMark />
         <NavLinks />
@@ -92,15 +99,24 @@ export function MobileNav() {
 
       {open && (
         <div className="fixed inset-0 z-50 flex">
-          <div className="absolute inset-0 bg-slate-900/50" onClick={() => setOpen(false)} aria-hidden="true" />
-          <div className="relative z-10 flex h-full w-64 flex-col gap-6 bg-white px-4 py-6 shadow-xl animate-slide-in">
+          <div
+            className="absolute inset-0 bg-slate-900/50"
+            onClick={() => setOpen(false)}
+            aria-hidden="true"
+          />
+          <div
+            className={cn(
+              'relative z-10 flex h-full w-64 flex-col gap-6 px-4 py-6 shadow-xl animate-slide-in',
+              PANEL_CLASSES,
+            )}
+          >
             <div className="flex items-center justify-between">
               <BrandMark />
               <button
                 type="button"
                 onClick={() => setOpen(false)}
                 aria-label="Close navigation menu"
-                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                className="rounded-lg p-1.5 text-brand-100 hover:bg-brand-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -115,11 +131,14 @@ export function MobileNav() {
 
 function BrandMark() {
   return (
-    <Link href="/" className="flex items-center gap-2.5">
-      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-600 text-sm font-bold text-white">
+    <Link
+      href="/"
+      className="flex items-center gap-2.5 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+    >
+      <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-white text-sm font-bold text-brand-700">
         SM
       </span>
-      <span className="text-sm font-semibold leading-tight text-slate-900">
+      <span className="text-sm font-semibold leading-tight text-white">
         School
         <br />
         Manager

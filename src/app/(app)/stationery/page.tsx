@@ -116,7 +116,7 @@ async function MatrixPanel({
           studentId: row.studentId,
           admissionNumber: row.admissionNumber,
           fullName: row.fullName,
-          issuedItemIds: [...row.issuedItemIds],
+          issued: [...row.issued.entries()],
         }))}
       />
     </Card>

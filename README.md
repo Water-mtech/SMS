@@ -19,12 +19,14 @@ year, and collect fees against a ledger that never loses an outstanding balance.
   off the matrix while keeping the record of everyone who already received it.
 - Fifteen classes: Pre-Nursery, Nursery 1–3, Primary 1–5, JSS 1–3, SS 1–3.
 - **Class matrix view** — students down the rows, items across the columns. An
-  issued item shows a green check (✓); one that has not been collected shows a
-  dash (—). Per-column tallies show how far each item has been distributed.
+  issued item shows a green check (✓), with a `×N` beside it when more than one
+  was issued; an item not yet collected shows a dash (—). Per-column tallies show
+  how far each item has been distributed.
 - **Student drawer** — clicking a student opens a slide-over with a **Select All**
   master checkbox (with a true indeterminate state) plus one checkbox per item.
-  Nothing is written until *Save*, and the save replaces the student's whole set
-  in one transaction.
+  Ticking an item reveals a **quantity** box pre-filled with 1 and editable up to
+  999. Nothing is written until *Save*, and the save replaces the student's whole
+  set — items and quantities together — in one transaction.
 
 ### 2. Student management & roster engine
 

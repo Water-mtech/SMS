@@ -5,11 +5,10 @@ import { useState, useTransition } from 'react';
 import { Archive, PackagePlus, Pencil, RotateCcw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { TextArea, TextInput } from '@/components/ui/field';
+import { TextInput } from '@/components/ui/field';
 import { Modal } from '@/components/ui/overlay';
 import { Alert, Badge, EmptyState } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import { formatNaira } from '@/lib/format';
 import {
   createStationeryItem,
   setStationeryItemActive,
@@ -19,8 +18,6 @@ import {
 export interface CatalogueRow {
   id: string;
   name: string;
-  description: string | null;
-  unitPrice: number;
   displayOrder: number;
   isActive: boolean;
   issuedCount: number;
@@ -107,7 +104,6 @@ export function CatalogueManager({
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50 text-left">
                 <th scope="col" className="px-4 py-3 font-semibold text-slate-700">Item</th>
-                <th scope="col" className="px-4 py-3 text-right font-semibold text-slate-700">Price</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold text-slate-700">Order</th>
                 <th scope="col" className="px-4 py-3 text-right font-semibold text-slate-700">Issued</th>
                 <th scope="col" className="px-4 py-3 font-semibold text-slate-700">Status</th>
@@ -122,15 +118,9 @@ export function CatalogueManager({
                   key={item.id}
                   className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
                 >
-                  <th scope="row" className="px-4 py-3 text-left font-normal">
-                    <span className="block font-medium text-slate-900">{item.name}</span>
-                    {item.description && (
-                      <span className="block text-xs text-slate-500">{item.description}</span>
-                    )}
+                  <th scope="row" className="px-4 py-3 text-left font-medium text-slate-900">
+                    {item.name}
                   </th>
-                  <td className="px-4 py-3 text-right tabular-nums text-slate-600">
-                    {formatNaira(item.unitPrice)}
-                  </td>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-400">
                     {item.displayOrder}
                   </td>
@@ -327,31 +317,14 @@ function ItemFormModal({
           placeholder="2B Exercise Book"
           error={fieldErrors.name}
         />
-        <TextArea
-          label="Description"
-          name="description"
-          defaultValue={item?.description ?? ''}
-          placeholder="80-leaf ruled exercise book"
-          error={fieldErrors.description}
+        <TextInput
+          label="Display order"
+          name="displayOrder"
+          inputMode="numeric"
+          defaultValue={item ? String(item.displayOrder) : '0'}
+          hint="Lower numbers appear further left on the class matrix"
+          error={fieldErrors.displayOrder}
         />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextInput
-            label="Unit price"
-            name="unitPrice"
-            inputMode="decimal"
-            defaultValue={item ? String(item.unitPrice) : '0'}
-            hint="Used for the drawer's running total"
-            error={fieldErrors.unitPrice}
-          />
-          <TextInput
-            label="Display order"
-            name="displayOrder"
-            inputMode="numeric"
-            defaultValue={item ? String(item.displayOrder) : '0'}
-            hint="Lower numbers appear first"
-            error={fieldErrors.displayOrder}
-          />
-        </div>
       </form>
     </Modal>
   );

@@ -515,7 +515,7 @@ export interface Database {
     Views: { [_ in never]: never };
     Functions: {
       set_student_stationery: {
-        Args: { p_student_id: string; p_term_id: string; p_item_ids: string[] };
+        Args: { p_student_id: string; p_term_id: string; p_items: Json };
         Returns: Database['public']['Tables']['stationery_issues']['Row'][];
       };
       class_stationery_matrix: {
@@ -524,7 +524,8 @@ export interface Database {
           student_id: string;
           admission_number: string;
           full_name: string;
-          issued_item_ids: string[];
+          /** `{ "<item_id>": quantity }` for everything this student holds. */
+          issued: Record<string, number>;
         }[];
       };
       sync_class_fee_bills: {
@@ -604,12 +605,19 @@ export interface ClassWithSection extends ClassRow {
   section: Pick<Section, 'id' | 'name' | 'slug' | 'display_order'>;
 }
 
+/** An issued item and how many of it the student received. */
+export interface IssuedItem {
+  itemId: string;
+  quantity: number;
+}
+
 /** One row of the stationery matrix, resolved for rendering. */
 export interface MatrixRow {
   studentId: string;
   admissionNumber: string;
   fullName: string;
-  issuedItemIds: Set<string>;
+  /** item id -> quantity issued. Absent from the map means not issued. */
+  issued: Map<string, number>;
 }
 
 /** A student's ledger line for a term, joined with identity fields. */
