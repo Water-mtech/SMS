@@ -1,21 +1,22 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useRef, useState, useTransition } from 'react';
+import { useMemo, useRef, useState, useTransition } from 'react';
 import { Download, FileSpreadsheet, Upload } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { SelectInput } from '@/components/ui/field';
 import { Alert, Badge, Card, CardHeader } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
+import { groupRowsByClass } from '@/lib/roster/grouping';
 import {
   importTemplateCsv,
   parseRosterFile,
-  type ImportRow,
+  type ParsedImportRow,
   type ParseResult,
 } from '@/lib/roster/import';
 import { errorMessage } from '@/lib/utils';
-import { bulkImportStudents } from '@/server/actions/students';
+import { bulkImportStudentsByClass } from '@/server/actions/students';
 
 interface ImportWizardProps {
   classes: { id: string; name: string; sectionName: string }[];
@@ -29,6 +30,10 @@ const PREVIEW_LIMIT = 10;
  * Three-step bulk import: pick the class, drop a CSV/Excel file, review the
  * parsed rows, then commit. Parsing and validation happen locally so nothing
  * reaches the database until the user has seen exactly what will be created.
+ *
+ * A file may carry its own `class` column, in which case the whole school goes
+ * in as one upload and the class picked on screen only covers rows that leave
+ * it blank.
  */
 export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardProps) {
   const router = useRouter();
@@ -68,34 +73,85 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
     URL.revokeObjectURL(url);
   }
 
+  // Rows carrying their own class are routed by it; the rest fall back to the
+  // class chosen above. Recomputed as the picker changes so the summary is live.
+  const grouping = useMemo(() => {
+    if (!parsed) return null;
+    const fallback = classes.find((item) => item.id === classId) ?? null;
+    return groupRowsByClass(parsed.rows, classes, fallback);
+  }, [parsed, classes, classId]);
+
+  const readyCount = grouping?.groups.reduce((total, group) => total + group.rows.length, 0) ?? 0;
+  const unmatched = grouping?.unmatched ?? [];
+
+  // Flatten just enough of the grouped rows to fill the preview table, so the
+  // preview shows the class each student will actually land in.
+  const previewRows = useMemo(() => {
+    const preview: { row: ParsedImportRow; className: string }[] = [];
+    for (const group of grouping?.groups ?? []) {
+      for (const row of group.rows) {
+        if (preview.length >= PREVIEW_LIMIT) return preview;
+        preview.push({ row, className: group.target.name });
+      }
+    }
+    return preview;
+  }, [grouping]);
+  const spansClasses = (grouping?.groups.length ?? 0) > 1;
+
   function commit() {
-    if (!parsed || !termId || !classId) return;
+    if (!grouping || !termId || grouping.groups.length === 0) return;
 
     startTransition(async () => {
-      const result = await bulkImportStudents({ classId, termId, rows: parsed.rows as ImportRow[] });
+      const result = await bulkImportStudentsByClass({
+        termId,
+        groups: grouping.groups.map((group) => ({
+          classId: group.target.id,
+          className: group.target.name,
+          rows: group.rows,
+        })),
+      });
+
       if (!result.ok) {
         toast(result.error, 'error');
         return;
       }
 
-      const { imported, skipped } = result.data;
-      toast(
-        skipped > 0
-          ? `${imported} student(s) imported, ${skipped} skipped as duplicates`
-          : `${imported} student(s) imported`,
-        'success',
-      );
-      router.push(`/students?class=${classId}`);
+      const { imported, skipped, failed } = result.data;
+      if (failed.length > 0) {
+        toast(
+          `${imported} imported. ${failed.length} class(es) failed: ${failed
+            .map((item) => `${item.className} — ${item.message}`)
+            .join('; ')}`,
+          'error',
+        );
+      } else {
+        toast(
+          skipped > 0
+            ? `${imported} student(s) imported, ${skipped} skipped as duplicates`
+            : `${imported} student(s) imported`,
+          'success',
+        );
+      }
+
+      const only = grouping.groups[0];
+      router.push(spansClasses || !only ? '/students' : `/students?class=${only.target.id}`);
       router.refresh();
     });
   }
 
-  const canCommit = Boolean(parsed && parsed.rows.length > 0 && classId && termId && !pending);
+  const canCommit = Boolean(grouping && grouping.groups.length > 0 && termId && !pending);
 
   return (
     <div className="space-y-5">
       <Card>
-        <CardHeader title="1. Choose the destination class" description="Every row in the file is imported into this class." />
+        <CardHeader
+          title="1. Choose the destination class"
+          description={
+            spansClasses
+              ? 'Your file has a class column, so each row goes to its own class. This picker only covers rows that leave it blank.'
+              : 'Every row without a class column of its own is imported into this class.'
+          }
+        />
         <div className="max-w-sm p-5">
           <SelectInput
             label="Class"
@@ -112,7 +168,7 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
       <Card>
         <CardHeader
           title="2. Upload the roster"
-          description="CSV, XLSX or XLS. Column names are matched flexibly — 'Surname', 'Last Name' and 'last_name' all work."
+          description="CSV, XLSX or XLS. Column names are matched flexibly — 'Surname', 'Last Name' and 'last_name' all work. Add a 'class' column to import the whole school in one file."
           action={
             <Button variant="outline" size="sm" onClick={downloadTemplate}>
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
@@ -153,17 +209,55 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
         <Card>
           <CardHeader
             title="3. Review and import"
-            description={`${parsed.rows.length} valid row(s) ready. Rows with problems are listed below and will not be imported.`}
+            description={`${readyCount} valid row(s) ready. Rows with problems are listed below and will not be imported.`}
           />
 
           <div className="space-y-4 p-5">
             <div className="flex flex-wrap gap-2">
-              <Badge tone="success">{parsed.rows.length} ready</Badge>
+              <Badge tone="success">{readyCount} ready</Badge>
+              {spansClasses && <Badge>{grouping?.groups.length} classes</Badge>}
+              {unmatched.length > 0 && <Badge tone="danger">{unmatched.length} unknown class</Badge>}
               {parsed.errors.length > 0 && <Badge tone="danger">{parsed.errors.length} rejected</Badge>}
               {parsed.unmappedHeaders.length > 0 && (
                 <Badge tone="warning">{parsed.unmappedHeaders.length} unknown column(s)</Badge>
               )}
             </div>
+
+            {spansClasses && grouping && (
+              <div className="overflow-hidden rounded-lg border border-slate-200">
+                <table className="w-full border-collapse text-sm">
+                  <caption className="sr-only">How many students go to each class.</caption>
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50 text-left">
+                      <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Class</th>
+                      <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Students</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grouping.groups.map((group) => (
+                      <tr key={group.target.id} className="border-b border-slate-100 last:border-0">
+                        <td className="px-3 py-2 text-slate-900">{group.target.name}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+                          {group.rows.length}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {unmatched.length > 0 && (
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-red-200 bg-red-50 p-3">
+                <ul className="space-y-1 text-sm text-red-800">
+                  {unmatched.map((error) => (
+                    <li key={`${error.line}-${error.message}`}>
+                      <strong>Row {error.line}:</strong> {error.message}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             {parsed.unmappedHeaders.length > 0 && (
               <Alert tone="warning">
@@ -183,7 +277,7 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
               </div>
             )}
 
-            {parsed.rows.length > 0 && (
+            {readyCount > 0 && (
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <table className="w-full border-collapse text-sm">
                   <caption className="sr-only">Preview of the students that will be imported.</caption>
@@ -191,26 +285,28 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
                     <tr className="border-b border-slate-200 bg-slate-50 text-left">
                       <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Admission no.</th>
                       <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Name</th>
+                      <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Class</th>
                       <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Gender</th>
                       <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Guardian</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {parsed.rows.slice(0, PREVIEW_LIMIT).map((row) => (
+                    {previewRows.map(({ row, className }) => (
                       <tr key={row.admission_number} className="border-b border-slate-100 last:border-0">
                         <td className="px-3 py-2 text-slate-600">{row.admission_number}</td>
                         <td className="px-3 py-2 text-slate-900">
                           {row.last_name} {row.first_name} {row.middle_name ?? ''}
                         </td>
+                        <td className="px-3 py-2 text-slate-600">{className}</td>
                         <td className="px-3 py-2 capitalize text-slate-600">{row.gender ?? '—'}</td>
                         <td className="px-3 py-2 text-slate-600">{row.guardian_name ?? '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {parsed.rows.length > PREVIEW_LIMIT && (
+                {readyCount > PREVIEW_LIMIT && (
                   <p className="border-t border-slate-200 px-3 py-2 text-xs text-slate-500">
-                    Showing the first {PREVIEW_LIMIT} of {parsed.rows.length} rows.
+                    Showing the first {PREVIEW_LIMIT} of {readyCount} rows.
                   </p>
                 )}
               </div>
@@ -237,7 +333,7 @@ export function ImportWizard({ classes, termId, defaultClassId }: ImportWizardPr
               </Button>
               <Button onClick={commit} loading={pending} disabled={!canCommit}>
                 <FileSpreadsheet className="h-4 w-4" aria-hidden="true" />
-                Import {parsed.rows.length} student(s)
+                Import {readyCount} student(s)
               </Button>
             </div>
           </div>
