@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 
+import type { BulkImportSummary } from '@/lib/roster/grouping';
 import { importRowSchema } from '@/lib/roster/import';
 import { createClient } from '@/lib/supabase/server';
 import { errorMessage } from '@/lib/utils';
@@ -109,41 +110,72 @@ export async function createStudent(formData: FormData): Promise<ActionResult<{ 
   }
 }
 
-const bulkImportSchema = z.object({
-  classId: z.string().uuid('Select the class to import into'),
+const bulkImportGroupsSchema = z.object({
   termId: z.string().uuid(),
-  rows: z.array(importRowSchema).min(1, 'There are no valid rows to import'),
+  groups: z
+    .array(
+      z.object({
+        classId: z.string().uuid(),
+        className: z.string().trim().min(1),
+        rows: z.array(importRowSchema).min(1),
+      }),
+    )
+    .min(1, 'There are no valid rows to import'),
 });
 
 /**
- * Import a parsed roster in a single transaction. Rows whose admission number
- * already exists are skipped rather than failing the batch, and the count comes
- * back so the UI can report exactly what happened.
+ * Import a roster that spans several classes in one go.
+ *
+ * Each class is its own transaction, so one bad batch cannot roll back the
+ * others. A failure is collected rather than thrown: with a few hundred rows in
+ * flight, reporting "312 in, Primary 4 failed because X" is far more useful than
+ * abandoning the whole upload. Re-running is safe — existing admission numbers
+ * are skipped, not duplicated.
  */
-export async function bulkImportStudents(
-  input: z.infer<typeof bulkImportSchema>,
-): Promise<ActionResult<{ imported: number; skipped: number }>> {
-  const parsed = bulkImportSchema.safeParse(input);
+export async function bulkImportStudentsByClass(
+  input: z.infer<typeof bulkImportGroupsSchema>,
+): Promise<ActionResult<BulkImportSummary>> {
+  const parsed = bulkImportGroupsSchema.safeParse(input);
   if (!parsed.success) {
     return failure(parsed.error.issues[0]?.message ?? 'Invalid import payload');
   }
 
+  const summary: BulkImportSummary = { imported: 0, skipped: 0, perClass: [], failed: [] };
+
   try {
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc('bulk_import_students', {
-      p_class_id: parsed.data.classId,
-      p_term_id: parsed.data.termId,
-      p_rows: parsed.data.rows,
-    });
 
-    if (error) return failure(fromPostgrestError(error));
+    for (const group of parsed.data.groups) {
+      const { data, error } = await supabase.rpc('bulk_import_students', {
+        p_class_id: group.classId,
+        p_term_id: parsed.data.termId,
+        p_rows: group.rows,
+      });
 
-    const summary = data?.[0] ?? { imported: 0, skipped: 0 };
+      if (error) {
+        summary.failed.push({ className: group.className, message: fromPostgrestError(error) });
+        continue;
+      }
+
+      const counts = data?.[0] ?? { imported: 0, skipped: 0 };
+      summary.imported += counts.imported;
+      summary.skipped += counts.skipped;
+      summary.perClass.push({
+        className: group.className,
+        imported: counts.imported,
+        skipped: counts.skipped,
+      });
+    }
+
+    // Every batch failed: there is nothing to celebrate, so report it as an error.
+    if (summary.perClass.length === 0 && summary.failed.length > 0) {
+      return failure(summary.failed[0]?.message ?? 'Could not import the roster');
+    }
 
     revalidatePath('/students');
     revalidatePath('/fees');
     revalidatePath('/stationery');
-    return ok({ imported: summary.imported, skipped: summary.skipped });
+    return ok(summary);
   } catch (error) {
     return failure(errorMessage(error, 'Could not import the roster'));
   }

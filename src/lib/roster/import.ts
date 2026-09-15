@@ -23,9 +23,20 @@ export const importRowSchema = z.object({
   guardian_name: z.string().trim().max(120).optional().nullable(),
   guardian_phone: z.string().trim().max(40).optional().nullable(),
   guardian_email: z.string().trim().email('Invalid guardian email').optional().nullable(),
+  /**
+   * Optional. When present, each row carries its own class and one file can
+   * cover the whole school; when absent the importer falls back to the single
+   * class chosen on screen.
+   */
+  class_name: z.string().trim().max(80).optional().nullable(),
 });
 
 export type ImportRow = z.infer<typeof importRowSchema>;
+
+/** A validated row plus the spreadsheet line it came from, for error reporting. */
+export interface ParsedImportRow extends ImportRow {
+  line: number;
+}
 
 export interface RowError {
   /** 1-based row number as it appears in the user's spreadsheet, header included. */
@@ -34,7 +45,7 @@ export interface RowError {
 }
 
 export interface ParseResult {
-  rows: ImportRow[];
+  rows: ParsedImportRow[];
   errors: RowError[];
   /** Header names we could not map, surfaced so the user can fix their file. */
   unmappedHeaders: string[];
@@ -71,12 +82,19 @@ const HEADER_ALIASES: Record<string, keyof ImportRow> = {
   guardianemail: 'guardian_email',
   parentemail: 'guardian_email',
   email: 'guardian_email',
+  class: 'class_name',
+  classname: 'class_name',
+  currentclass: 'class_name',
+  studentclass: 'class_name',
+  grade: 'class_name',
+  level: 'class_name',
 };
 
 export const IMPORT_TEMPLATE_HEADERS = [
   'admission_number',
   'first_name',
   'last_name',
+  'class',
   'middle_name',
   'gender',
   'date_of_birth',
@@ -131,7 +149,7 @@ function cleanCell(value: unknown): string {
 
 /** Turn raw header/value records into validated rows plus per-line errors. */
 export function normaliseRecords(records: Record<string, unknown>[]): ParseResult {
-  const rows: ImportRow[] = [];
+  const rows: ParsedImportRow[] = [];
   const errors: RowError[] = [];
   const unmapped = new Set<string>();
   const seenAdmissionNumbers = new Set<string>();
@@ -176,7 +194,7 @@ export function normaliseRecords(records: Record<string, unknown>[]): ParseResul
     }
 
     seenAdmissionNumbers.add(admissionNumber);
-    rows.push(parsed.data);
+    rows.push({ ...parsed.data, line });
   });
 
   return { rows, errors, unmappedHeaders: [...unmapped] };
@@ -213,8 +231,8 @@ export async function parseRosterFile(file: File): Promise<ParseResult> {
 /** A ready-to-fill CSV the user can download from the import screen. */
 export function importTemplateCsv(): string {
   const sample = [
-    'BFS/2026/001,Grace,Adeyemi,Ifeoluwa,female,2016-05-12,Mr Tunde Adeyemi,08031234567,tunde@example.com',
-    'BFS/2026/002,Musa,Ibrahim,,male,2015-11-03,Mrs Aisha Ibrahim,08129876543,',
+    'BFS/2026/001,Grace,Adeyemi,Primary 3,Ifeoluwa,female,2016-05-12,Mr Tunde Adeyemi,08031234567,tunde@example.com',
+    'BFS/2026/002,Musa,Ibrahim,JSS 1,,male,2015-11-03,Mrs Aisha Ibrahim,08129876543,',
   ];
   return [IMPORT_TEMPLATE_HEADERS.join(','), ...sample].join('\n');
 }
