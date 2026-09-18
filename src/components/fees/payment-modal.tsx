@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Receipt } from '@/components/fees/receipt';
@@ -24,12 +24,20 @@ interface PaymentModalProps {
  * Payment entry with live arithmetic: as the bursar types an amount, the
  * remaining balance updates on the spot, so ₦20,000 against a ₦200,000 bill
  * reads "₦180,000 remaining" before anything is submitted.
+ *
+ * The remaining figure is a suggestion, not a rule. There are charges outside
+ * the school fee, so a parent can hand over more than the bill and still owe;
+ * the amount is recorded as received and the outstanding figure is whatever the
+ * bursar says it is.
  */
 export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) {
   const router = useRouter();
   const { toast } = useToast();
 
   const [amountInput, setAmountInput] = useState('');
+  const [outstandingInput, setOutstandingInput] = useState('');
+  // Once the outstanding box is typed in, subtraction stops overwriting it.
+  const [touched, setTouched] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
@@ -39,19 +47,33 @@ export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) 
 
   const totalDue = row?.balance ?? 0;
 
+  useEffect(() => {
+    if (open) setOutstandingInput(String(totalDue));
+  }, [open, totalDue]);
+
   const calculation = useMemo(() => {
     const amount = toKobo(toAmount(amountInput));
-    const remaining = toKobo(totalDue - amount);
+    const remaining = toKobo(toAmount(outstandingInput));
     return {
       amount,
       remaining,
+      // Paying past the recorded bill is allowed; it is worth pointing out, not blocking.
       overpaying: amount > totalDue,
-      clears: amount > 0 && remaining <= 0,
+      clears: remaining <= 0,
     };
-  }, [amountInput, totalDue]);
+  }, [amountInput, outstandingInput, totalDue]);
+
+  function onAmountChange(value: string) {
+    setAmountInput(value);
+    setError(null);
+    if (touched) return;
+    setOutstandingInput(String(Math.max(toKobo(totalDue - toKobo(toAmount(value))), 0)));
+  }
 
   function reset() {
     setAmountInput('');
+    setOutstandingInput(String(totalDue));
+    setTouched(false);
     setMethod('cash');
     setReference('');
     setNotes('');
@@ -74,8 +96,8 @@ export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) 
       setError('Enter an amount greater than zero');
       return;
     }
-    if (calculation.overpaying) {
-      setError(`That is more than the ${formatNaira(totalDue)} outstanding on this account`);
+    if (calculation.remaining < 0) {
+      setError('Outstanding cannot be negative');
       return;
     }
 
@@ -84,6 +106,7 @@ export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) 
         studentId: row.studentId,
         termId,
         amount: calculation.amount,
+        outstandingAfter: calculation.remaining,
         method,
         reference: reference.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -131,8 +154,8 @@ export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) 
             <p className="text-xs uppercase tracking-wide text-slate-500">Remaining after payment</p>
             <p
               className={
-                calculation.overpaying
-                  ? 'text-base font-semibold text-red-600'
+                calculation.clears
+                  ? 'text-base font-semibold text-brand-700'
                   : 'text-base font-semibold text-slate-900'
               }
             >
@@ -164,17 +187,47 @@ export function PaymentModal({ open, row, termId, onClose }: PaymentModalProps) 
           inputMode="decimal"
           autoFocus
           value={amountInput}
-          onChange={(event) => setAmountInput(event.target.value)}
+          onChange={(event) => onAmountChange(event.target.value)}
           placeholder="0.00"
-          hint={`Maximum ${formatNaira(totalDue)}`}
-          error={calculation.overpaying ? 'Exceeds the outstanding balance' : undefined}
+          hint="Record what the parent actually handed over"
         />
 
-        {calculation.amount > 0 && !calculation.overpaying && (
+        <div>
+          <TextInput
+            label="Outstanding after this payment"
+            inputMode="decimal"
+            value={outstandingInput}
+            onChange={(event) => {
+              setTouched(true);
+              setError(null);
+              setOutstandingInput(event.target.value);
+            }}
+            placeholder="0.00"
+            hint="Suggested by subtraction — change it if other charges are still owed"
+          />
+          {touched && (
+            <div className="mt-1.5 flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setTouched(false);
+                  setOutstandingInput(
+                    String(Math.max(toKobo(totalDue - calculation.amount), 0)),
+                  );
+                }}
+              >
+                Reset to {formatNaira(Math.max(toKobo(totalDue - calculation.amount), 0))}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {calculation.amount > 0 && (
           <Alert tone={calculation.clears ? 'success' : 'info'}>
-            Paying <strong>{formatNaira(calculation.amount)}</strong> of{' '}
-            <strong>{formatNaira(totalDue)}</strong> leaves a balance of{' '}
-            <strong>{formatNaira(calculation.remaining)}</strong>
+            Paying <strong>{formatNaira(calculation.amount)}</strong>
+            {calculation.overpaying && ' — more than the recorded fee'} leaves a balance of{' '}
+            <strong>{formatNaira(Math.max(calculation.remaining, 0))}</strong>
             {calculation.clears ? ' — this clears the account.' : '.'}
           </Alert>
         )}

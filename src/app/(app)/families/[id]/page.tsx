@@ -6,7 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import { FamilyChildrenPanel } from '@/components/families/family-children-panel';
 import { FamilyFormModal } from '@/components/families/family-form-modal';
 import { Alert, Card, PageHeader } from '@/components/ui/primitives';
-import { formatDateTime, formatNaira, formatTerm } from '@/lib/format';
+import { formatDateTime, formatNaira, formatPaymentMethod, formatTerm } from '@/lib/format';
 import {
   getCurrentProfile,
   getFamily,
@@ -70,7 +70,11 @@ export default async function FamilyPage({ params, searchParams }: PageProps) {
           familyId={family.id}
           familyName={family.name}
           pupils={family.children}
+          arrears={family.arrears}
+          currentBill={family.currentBill}
+          totalPaid={family.totalPaid}
           outstanding={family.outstanding}
+          hasFee={family.hasFee}
           termId={term.id}
           termLabel={term.label}
           sessionName={sessionName}
@@ -82,8 +86,7 @@ export default async function FamilyPage({ params, searchParams }: PageProps) {
         <div className="border-b border-slate-200 px-5 py-3">
           <h2 className="text-sm font-semibold text-slate-900">Family payments</h2>
           <p className="text-xs text-slate-500">
-            Handovers covering more than one child. Payments made for a single pupil appear on that
-            pupil&rsquo;s own record.
+            Every payment taken against this household&rsquo;s fee.
           </p>
         </div>
 
@@ -97,7 +100,7 @@ export default async function FamilyPage({ params, searchParams }: PageProps) {
                 <tr className="border-b border-slate-200 bg-slate-50 text-left">
                   <th scope="col" className="px-5 py-2 font-semibold text-slate-700">Receipt</th>
                   <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Date</th>
-                  <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Covered</th>
+                  <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Method</th>
                   <th scope="col" className="px-5 py-2 text-right font-semibold text-slate-700">Amount</th>
                 </tr>
               </thead>
@@ -112,23 +115,17 @@ export default async function FamilyPage({ params, searchParams }: PageProps) {
                     </td>
                     <td className="px-3 py-2.5 text-slate-600">{formatDateTime(payment.paid_at)}</td>
                     <td className="px-3 py-2.5 text-slate-600">
-                      <ul className="space-y-0.5">
-                        {payment.payments.map((slip) => (
-                          <li key={slip.id} className={slip.voided_at ? 'line-through opacity-60' : undefined}>
-                            {[slip.student?.last_name, slip.student?.first_name]
-                              .filter(Boolean)
-                              .join(' ')}{' '}
-                            <span className="tabular-nums">{formatNaira(Number(slip.amount))}</span>
-                          </li>
-                        ))}
-                      </ul>
+                      {formatPaymentMethod(payment.method)}
+                      {payment.reference && (
+                        <span className="block text-xs text-slate-500">{payment.reference}</span>
+                      )}
                     </td>
                     <td className="px-5 py-2.5 text-right">
                       <span className="font-semibold tabular-nums text-slate-900">
                         {formatNaira(Number(payment.total_amount))}
                       </span>
                       <span className="block text-xs text-slate-500">
-                        left {formatNaira(Number(payment.balance_after))}
+                        outstanding {formatNaira(Number(payment.balance_after))}
                       </span>
                     </td>
                   </tr>

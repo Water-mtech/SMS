@@ -5,7 +5,6 @@ const files = [
   'src/lib/__tests__/retry-fetch.test.mjs',
   'src/lib/__tests__/quantity.test.mjs',
   'src/lib/__tests__/roster-classes.test.mjs',
-  'src/lib/__tests__/allocate.test.mjs',
   'src/lib/__tests__/overlay-focus.test.tsx',
 ];
 

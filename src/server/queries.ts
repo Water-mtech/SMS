@@ -259,7 +259,7 @@ export async function getClassLedger(classId: string, termId: string): Promise<L
     .from('students')
     .select(
       `id, admission_number, first_name, last_name, middle_name,
-       class:classes(name),
+       class:classes(name), family:families(id, name),
        fee_accounts(id, term_id, arrears, current_bill, total_paid, balance)`,
     )
     .eq('class_id', classId)
@@ -278,6 +278,7 @@ export async function getClassLedger(classId: string, termId: string): Promise<L
     last_name: string;
     middle_name: string | null;
     class: { name: string } | null;
+    family: { id: string; name: string } | null;
     fee_accounts: {
       id: string;
       arrears: number;
@@ -299,6 +300,10 @@ export async function getClassLedger(classId: string, termId: string): Promise<L
       currentBill: toAmount(account?.current_bill ?? 0),
       totalPaid: toAmount(account?.total_paid ?? 0),
       balance: toAmount(account?.balance ?? 0),
+      // A pupil in a household is billed there, not here: the class ledger shows
+      // who they belong to rather than a misleading zero.
+      familyId: row.family?.id ?? null,
+      familyName: row.family?.name ?? null,
     };
   });
 }
@@ -480,17 +485,15 @@ export const listFamilies = cache(async function listFamilies(
   }));
 });
 
+/**
+ * A child of a household. Deliberately carries no figures: the family is what
+ * the school bills, so the ledger lives on the household, not here.
+ */
 export interface FamilyChild {
   studentId: string;
   admissionNumber: string;
   fullName: string;
   className: string;
-  arrears: number;
-  currentBill: number;
-  totalPaid: number;
-  balance: number;
-  /** False when nobody has billed this child for the term yet. */
-  hasAccount: boolean;
 }
 
 export interface FamilyDetail {
@@ -500,7 +503,13 @@ export interface FamilyDetail {
   email: string | null;
   notes: string | null;
   children: FamilyChild[];
+  /** The household's own ledger for the term. */
+  arrears: number;
+  currentBill: number;
+  totalPaid: number;
   outstanding: number;
+  /** False when no fee has been set for this household this term. */
+  hasFee: boolean;
 }
 
 /** One household with every child's ledger for the given term. */
@@ -518,18 +527,22 @@ export const getFamily = cache(async function getFamily(
   if (familyError) fail('Failed to load the family', familyError);
   if (!family) return null;
 
-  const { data, error } = await supabase
-    .from('students')
-    .select(
-      `id, admission_number, first_name, last_name, middle_name,
-       class:classes(name, promotion_order),
-       fee_accounts(id, term_id, arrears, current_bill, total_paid, balance)`,
-    )
-    .eq('family_id', familyId)
-    .is('archived_at', null)
-    .eq('status', 'active')
-    .eq('fee_accounts.term_id', termId);
+  const [{ data, error }, { data: account, error: accountError }] = await Promise.all([
+    supabase
+      .from('students')
+      .select('id, admission_number, first_name, last_name, middle_name, class:classes(name, promotion_order)')
+      .eq('family_id', familyId)
+      .is('archived_at', null)
+      .eq('status', 'active'),
+    supabase
+      .from('family_fee_accounts')
+      .select('arrears, current_bill, total_paid, balance')
+      .eq('family_id', familyId)
+      .eq('term_id', termId)
+      .maybeSingle(),
+  ]);
   if (error) fail("Failed to load the family's children", error);
+  if (accountError) fail("Failed to load the family's ledger", accountError);
 
   type Raw = {
     id: string;
@@ -538,32 +551,17 @@ export const getFamily = cache(async function getFamily(
     last_name: string;
     middle_name: string | null;
     class: { name: string; promotion_order: number } | null;
-    fee_accounts: {
-      id: string;
-      arrears: number;
-      current_bill: number;
-      total_paid: number;
-      balance: number;
-    }[];
   };
 
   const children = ((data ?? []) as unknown as Raw[])
     // Eldest first, so the list reads the way the parent thinks of their children.
     .sort((a, b) => (b.class?.promotion_order ?? 0) - (a.class?.promotion_order ?? 0))
-    .map((row) => {
-      const account = row.fee_accounts[0];
-      return {
-        studentId: row.id,
-        admissionNumber: row.admission_number,
-        fullName: [row.last_name, row.first_name, row.middle_name].filter(Boolean).join(' '),
-        className: row.class?.name ?? '—',
-        arrears: toAmount(account?.arrears ?? 0),
-        currentBill: toAmount(account?.current_bill ?? 0),
-        totalPaid: toAmount(account?.total_paid ?? 0),
-        balance: toAmount(account?.balance ?? 0),
-        hasAccount: Boolean(account),
-      };
-    });
+    .map((row) => ({
+      studentId: row.id,
+      admissionNumber: row.admission_number,
+      fullName: [row.last_name, row.first_name, row.middle_name].filter(Boolean).join(' '),
+      className: row.class?.name ?? '—',
+    }));
 
   return {
     id: family.id,
@@ -572,7 +570,11 @@ export const getFamily = cache(async function getFamily(
     email: family.email,
     notes: family.notes,
     children,
-    outstanding: toAmount(children.reduce((sum, child) => sum + child.balance, 0)),
+    arrears: toAmount(account?.arrears ?? 0),
+    currentBill: toAmount(account?.current_bill ?? 0),
+    totalPaid: toAmount(account?.total_paid ?? 0),
+    outstanding: toAmount(account?.balance ?? 0),
+    hasFee: Boolean(account),
   };
 });
 
@@ -642,11 +644,7 @@ export const getFamilyPayments = cache(async function getFamilyPayments(
   const supabase = await createClient();
   const { data, error } = await supabase
     .from('family_payments')
-    .select(
-      `*, term:terms(label, session:academic_sessions(name)),
-       payments:fee_payments(id, amount, receipt_number, voided_at,
-         student:students(first_name, last_name, admission_number, class:classes(name)))`,
-    )
+    .select('*, term:terms(label, session:academic_sessions(name))')
     .eq('family_id', familyId)
     .order('paid_at', { ascending: false })
     .limit(limit);

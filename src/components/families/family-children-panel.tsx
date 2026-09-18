@@ -1,10 +1,11 @@
 'use client';
 
-import { Search, UserMinus, UserPlus, Wallet } from 'lucide-react';
+import { Pencil, Search, UserMinus, UserPlus, Wallet } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useState, useTransition } from 'react';
 
+import { FamilyFeeModal } from '@/components/families/family-fee-modal';
 import { FamilyPaymentModal } from '@/components/families/family-payment-modal';
 import { Button } from '@/components/ui/button';
 import { Modal } from '@/components/ui/overlay';
@@ -19,7 +20,11 @@ interface FamilyChildrenPanelProps {
   familyId: string;
   familyName: string;
   pupils: FamilyChild[];
+  arrears: number;
+  currentBill: number;
+  totalPaid: number;
   outstanding: number;
+  hasFee: boolean;
   termId: string;
   termLabel: TermLabel;
   sessionName: string;
@@ -34,7 +39,11 @@ export function FamilyChildrenPanel({
   familyId,
   familyName,
   pupils,
+  arrears,
+  currentBill,
+  totalPaid,
   outstanding,
+  hasFee,
   termId,
   termLabel,
   sessionName,
@@ -44,11 +53,10 @@ export function FamilyChildrenPanel({
   const { toast } = useToast();
 
   const [paying, setPaying] = useState(false);
+  const [settingFee, setSettingFee] = useState(false);
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<FamilyChild | null>(null);
   const [pending, startTransition] = useTransition();
-
-  const missingAccounts = pupils.filter((child) => !child.hasAccount);
 
   function confirmRemove() {
     if (!removing) return;
@@ -69,10 +77,9 @@ export function FamilyChildrenPanel({
     <>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
         <div>
-          <h2 className="text-sm font-semibold text-slate-900">Children</h2>
+          <h2 className="text-sm font-semibold text-slate-900">Household fees</h2>
           <p className="text-xs text-slate-500">
-            Owing together{' '}
-            <strong className="text-slate-700">{formatNaira(outstanding)}</strong>
+            One fee for the whole family, whatever classes the children are in.
           </p>
         </div>
         {canManage && (
@@ -81,12 +88,42 @@ export function FamilyChildrenPanel({
               <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
               Add children
             </Button>
-            <Button size="sm" onClick={() => setPaying(true)} disabled={outstanding <= 0}>
+            <Button variant="outline" size="sm" onClick={() => setSettingFee(true)}>
+              <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+              {hasFee ? 'Edit fee' : 'Set fee'}
+            </Button>
+            <Button size="sm" onClick={() => setPaying(true)} disabled={!hasFee}>
               <Wallet className="h-3.5 w-3.5" aria-hidden="true" />
-              Record family payment
+              Record payment
             </Button>
           </div>
         )}
+      </div>
+
+      {!hasFee ? (
+        <div className="p-4">
+          <Alert tone="warning">
+            No fee has been set for this household yet. Set one before taking a payment.
+          </Alert>
+        </div>
+      ) : (
+        <dl className="grid grid-cols-2 gap-px border-b border-slate-200 bg-slate-200 text-center sm:grid-cols-4">
+          <Figure label="Brought forward" value={formatNaira(arrears)} />
+          <Figure label="This term" value={formatNaira(currentBill)} />
+          <Figure label="Paid" value={formatNaira(totalPaid)} />
+          <Figure
+            label="Outstanding"
+            value={formatNaira(outstanding)}
+            emphasis
+            tone={outstanding > 0 ? 'owing' : 'clear'}
+          />
+        </dl>
+      )}
+
+      <div className="border-b border-slate-200 px-5 py-2.5">
+        <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Children in this family
+        </h3>
       </div>
 
       {pupils.length === 0 ? (
@@ -96,26 +133,13 @@ export function FamilyChildrenPanel({
         />
       ) : (
         <>
-          {missingAccounts.length > 0 && (
-            <div className="border-b border-slate-200 p-4">
-              <Alert tone="warning">
-                {missingAccounts.length} child(ren) have no bill for this term yet, so they cannot
-                be paid for. Apply the fee structure for their class on the Fees page first.
-              </Alert>
-            </div>
-          )}
-
           <div className="overflow-x-auto">
             <table className="w-full border-collapse text-sm">
-              <caption className="sr-only">Each child in this family and what they owe.</caption>
+              <caption className="sr-only">The children this household&rsquo;s fee covers.</caption>
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50 text-left">
                   <th scope="col" className="px-5 py-2 font-semibold text-slate-700">Pupil</th>
                   <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Class</th>
-                  <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Arrears</th>
-                  <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">This term</th>
-                  <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Paid</th>
-                  <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Balance</th>
                   {canManage && <th scope="col" className="px-5 py-2" />}
                 </tr>
               </thead>
@@ -132,26 +156,6 @@ export function FamilyChildrenPanel({
                       <span className="block text-xs text-slate-500">{child.admissionNumber}</span>
                     </td>
                     <td className="px-3 py-2.5 text-slate-600">{child.className}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                      {formatNaira(child.arrears)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                      {formatNaira(child.currentBill)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-600">
-                      {formatNaira(child.totalPaid)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      {!child.hasAccount ? (
-                        <Badge tone="warning">No bill</Badge>
-                      ) : child.balance > 0 ? (
-                        <span className="font-semibold tabular-nums text-slate-900">
-                          {formatNaira(child.balance)}
-                        </span>
-                      ) : (
-                        <Badge tone="success">Cleared</Badge>
-                      )}
-                    </td>
                     {canManage && (
                       <td className="px-5 py-2.5 text-right">
                         <Button
@@ -181,9 +185,23 @@ export function FamilyChildrenPanel({
             familyId={familyId}
             familyName={familyName}
             pupils={pupils}
+            outstanding={outstanding}
             termId={termId}
             termLabel={termLabel}
             sessionName={sessionName}
+          />
+
+          <FamilyFeeModal
+            open={settingFee}
+            onClose={() => setSettingFee(false)}
+            familyId={familyId}
+            familyName={familyName}
+            termId={termId}
+            arrears={arrears}
+            currentBill={currentBill}
+            totalPaid={totalPaid}
+            outstanding={outstanding}
+            hasFee={hasFee}
           />
 
           <AddChildrenModal
@@ -373,5 +391,32 @@ function AddChildrenModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+function Figure({
+  label,
+  value,
+  emphasis = false,
+  tone,
+}: {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+  tone?: 'owing' | 'clear';
+}) {
+  return (
+    <div className="bg-white px-2 py-3">
+      <dt className="text-[11px] uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd
+        className={
+          emphasis
+            ? `mt-0.5 text-sm font-bold ${tone === 'clear' ? 'text-brand-700' : 'text-slate-900'}`
+            : 'mt-0.5 text-sm text-slate-700'
+        }
+      >
+        {value}
+      </dd>
+    </div>
   );
 }

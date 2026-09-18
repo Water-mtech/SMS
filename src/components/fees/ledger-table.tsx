@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Pencil, Search, Wallet } from 'lucide-react';
 
 import { LedgerEditModal } from '@/components/fees/ledger-edit-modal';
@@ -101,11 +102,21 @@ export function LedgerTable({ rows, termId, classId, canRecordPayments }: Ledger
           <tbody>
             {filtered.map((row) => {
               const cleared = row.balance <= 0;
+              // Billed through a household: the money is owed and paid there.
+              const viaFamily = row.familyId !== null;
               return (
                 <tr key={row.studentId} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                   <th scope="row" className="px-4 py-3 text-left font-normal">
                     <span className="block font-medium text-slate-900">{row.fullName}</span>
                     <span className="block text-xs text-slate-500">{row.admissionNumber}</span>
+                    {viaFamily && (
+                      <Link
+                        href={`/families/${row.familyId}`}
+                        className="mt-0.5 inline-block text-xs text-brand-700 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+                      >
+                        Billed with {row.familyName}
+                      </Link>
+                    )}
                   </th>
                   <td className="px-4 py-3 text-right tabular-nums text-slate-600">
                     {formatNaira(row.arrears)}
@@ -117,7 +128,9 @@ export function LedgerTable({ rows, termId, classId, canRecordPayments }: Ledger
                     {formatNaira(row.totalPaid)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums">
-                    {cleared ? (
+                    {viaFamily ? (
+                      <Badge tone="neutral">With family</Badge>
+                    ) : cleared ? (
                       <Badge tone="success">Cleared</Badge>
                     ) : (
                       <span className="font-semibold text-slate-900">{formatNaira(row.balance)}</span>
@@ -125,25 +138,26 @@ export function LedgerTable({ rows, termId, classId, canRecordPayments }: Ledger
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1.5">
-                      {canRecordPayments && (
+                      {canRecordPayments && !viaFamily && (
                         <Button
                           size="sm"
-                          variant={cleared ? 'outline' : 'primary'}
-                          disabled={cleared}
+                          variant="primary"
                           onClick={() => setPayingRow(row)}
                           aria-label={`Record a payment for ${row.fullName}`}
                         >
                           Pay
                         </Button>
                       )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setEditingRow(row)}
-                        aria-label={`Adjust the ledger for ${row.fullName}`}
-                      >
-                        <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
-                      </Button>
+                      {!viaFamily && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingRow(row)}
+                          aria-label={`Set the fee for ${row.fullName}`}
+                        >
+                          <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </td>
                 </tr>

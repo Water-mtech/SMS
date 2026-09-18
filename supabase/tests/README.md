@@ -24,6 +24,7 @@ psql -h /tmp -p 55432 -U postgres -f supabase/tests/01_business_logic.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/02_row_level_security.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/03_stationery_catalogue.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/04_family_payments.sql
+psql -h /tmp -p 55432 -U postgres -f supabase/tests/05_editable_outstanding.sql
 ```
 
 `01_business_logic.sql` covers the bulk importer, the dual ledger, part payments
@@ -45,12 +46,19 @@ place, and values that are zero, missing or absurd are clamped to 1..999 rather
 than raising a constraint violation.
 
 `04_family_payments.sql` covers siblings paying together: grouping pupils into a
-household, the combined outstanding across classes, a part payment splitting
-into one numbered slip per child under a single family receipt, and the snapshot
-the parent is shown. It also asserts the refusals — overpaying one child fails
-the whole handover with every ledger untouched, a pupil from another household
-cannot be paid for through this family, an archived child drops out of the
-family total, and a teacher may read families but never take money.
+household, one fee covering children across three classes, a part payment moving
+the single household figure, and the snapshot the parent is shown. It asserts
+that children of a family carry no ledger of their own, that an overpayment is
+kept at its full amount, that a household with no fee cannot take a payment, that
+archiving a child changes the roll but not the debt, and that a teacher may read
+families but never take money.
+
+`05_editable_outstanding.sql` covers the fee model itself: a fee typed by hand
+with no class structure behind it, a payment recorded above the bill, outstanding
+set outright so charges outside the school fee are carried honestly, a negative
+outstanding floored at zero, voiding restoring the figure a payment was applied
+against, pupils billed through a household being skipped when a class structure
+is applied, and teachers being kept out of all of it.
 
 Every `PASS:` notice is an assertion that held. Any `FAIL:` line, or any error
 other than the ones the scripts deliberately provoke, is a regression.
