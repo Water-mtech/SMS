@@ -154,23 +154,25 @@ export async function deleteFamily(familyId: string): Promise<ActionResult> {
 const familyPaymentSchema = z.object({
   familyId: z.string().uuid(),
   termId: z.string().uuid(),
-  allocations: z
-    .array(
-      z.object({
-        studentId: z.string().uuid(),
-        amount: z.number().positive(),
-      }),
-    )
-    .min(1, 'Enter an amount for at least one pupil'),
+  amount: z.number().positive('Enter an amount greater than zero'),
+  /**
+   * What the household still owes once this payment is applied. Omitted, the
+   * ledger simply subtracts; given, it is taken as the truth — which is how a
+   * charge outside the school fee gets settled.
+   */
+  outstandingAfter: z.number().min(0).optional(),
   method: z.enum(['cash', 'bank_transfer', 'pos', 'cheque', 'online']).default('cash'),
   reference: z.string().trim().max(80).optional(),
   notes: z.string().trim().max(300).optional(),
 });
 
 /**
- * Record one handover covering several children. The RPC validates every line
- * against that child's own balance and writes the whole set in one transaction,
- * so a mistyped amount cannot leave half a payment behind.
+ * Record one payment for a household.
+ *
+ * The family is what the school bills, so the money lands on the family's own
+ * ledger rather than being split between the children. The amount is written as
+ * received — never capped against the bill — because a parent settling charges
+ * the system never saw is a normal Tuesday.
  */
 export async function recordFamilyPayment(
   input: z.infer<typeof familyPaymentSchema>,
@@ -185,13 +187,11 @@ export async function recordFamilyPayment(
     const { data, error } = await supabase.rpc('record_family_payment', {
       p_family_id: parsed.data.familyId,
       p_term_id: parsed.data.termId,
-      p_allocations: parsed.data.allocations.map((line) => ({
-        student_id: line.studentId,
-        amount: line.amount,
-      })),
+      p_amount: parsed.data.amount,
       p_method: parsed.data.method,
       p_reference: parsed.data.reference ?? null,
       p_notes: parsed.data.notes ?? null,
+      p_outstanding_after: parsed.data.outstandingAfter ?? null,
     });
 
     if (error) return failure(fromPostgrestError(error));
@@ -232,5 +232,50 @@ export async function searchStudentsForFamilyAction(
     return ok(await searchStudentsForFamily(term));
   } catch (error) {
     return failure(errorMessage(error, 'Could not search for pupils'));
+  }
+}
+
+const familyFeeSchema = z.object({
+  familyId: z.string().uuid(),
+  termId: z.string().uuid(),
+  arrears: z.number().min(0).default(0),
+  currentBill: z.number().min(0).default(0),
+  /** Omit to re-derive from billed less paid; give a number to set it outright. */
+  outstanding: z.number().min(0).optional(),
+});
+
+/**
+ * Set what a household owes for the term.
+ *
+ * There is no class structure behind this: a family spans classes, so its fee is
+ * whatever the school agreed with that parent, typed once and adjusted whenever
+ * it changes.
+ */
+export async function setFamilyFee(
+  input: z.infer<typeof familyFeeSchema>,
+): Promise<ActionResult> {
+  const parsed = familyFeeSchema.safeParse(input);
+  if (!parsed.success) {
+    return failure(parsed.error.issues[0]?.message ?? 'Check the amounts');
+  }
+
+  try {
+    const supabase = await createClient();
+    const { error } = await supabase.rpc('set_family_fee', {
+      p_family_id: parsed.data.familyId,
+      p_term_id: parsed.data.termId,
+      p_arrears: parsed.data.arrears,
+      p_current_bill: parsed.data.currentBill,
+      p_balance: parsed.data.outstanding ?? null,
+    });
+
+    if (error) return failure(fromPostgrestError(error));
+
+    revalidatePath('/families');
+    revalidatePath(`/families/${parsed.data.familyId}`);
+    revalidatePath('/fees');
+    return ok();
+  } catch (error) {
+    return failure(errorMessage(error, 'Could not set the family fee'));
   }
 }

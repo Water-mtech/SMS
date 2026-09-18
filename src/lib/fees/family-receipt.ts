@@ -2,7 +2,7 @@ import { school } from '@/lib/env';
 import { formatDateTime, formatNaira, formatPaymentMethod, formatTerm } from '@/lib/format';
 import type { PaymentMethod, TermLabel } from '@/lib/types/database';
 
-/** What `record_family_payment` hands back once the handover is written. */
+/** What `record_family_payment` hands back once the payment is written. */
 export interface FamilyReceiptPayload {
   familyPaymentId: string;
   receiptNumber: string;
@@ -13,15 +13,18 @@ export interface FamilyReceiptPayload {
   method: PaymentMethod;
 }
 
-/** One child's share of a family handover, as it appears on the slip. */
+/**
+ * A child the payment covers.
+ *
+ * Named, never priced: the household is what the school bills, so there is no
+ * honest per-child figure to print. Listing them still tells the parent which
+ * children this receipt answers for.
+ */
 export interface FamilyReceiptLine {
   studentId: string;
   studentName: string;
   admissionNumber: string;
   className: string;
-  amountPaid: number;
-  /** That child's own balance once their share was applied. */
-  balanceAfter: number;
 }
 
 export interface FamilyReceiptData extends FamilyReceiptPayload {
@@ -39,9 +42,7 @@ export interface FamilyReceiptData extends FamilyReceiptPayload {
  * question of whether it is genuine.
  */
 export function familyReceiptText(data: FamilyReceiptData): string {
-  const lines = data.lines
-    .filter((line) => line.amountPaid > 0)
-    .map((line) => `${line.studentName} (${line.className}): ${formatNaira(line.amountPaid)}`);
+  const pupils = data.lines.map((line) => `  ${line.studentName} (${line.className})`);
 
   return [
     `*${school.name}*`,
@@ -53,11 +54,9 @@ export function familyReceiptText(data: FamilyReceiptData): string {
     `Term: ${formatTerm(data.termLabel)} - ${data.sessionName}`,
     `Method: ${formatPaymentMethod(data.method)}`,
     '',
-    ...lines,
-    '',
-    `Family total due: ${formatNaira(data.balanceBefore)}`,
-    `Total paid: ${formatNaira(data.totalAmount)}`,
-    `Family outstanding: ${formatNaira(data.balanceAfter)}`,
+    ...(pupils.length > 0 ? ['Pupils covered:', ...pupils, ''] : []),
+    `Amount paid: ${formatNaira(data.totalAmount)}`,
+    `Outstanding: ${formatNaira(data.balanceAfter)}`,
     '',
     data.balanceAfter <= 0
       ? 'All fees fully cleared. Thank you.'

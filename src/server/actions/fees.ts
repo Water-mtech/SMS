@@ -16,6 +16,12 @@ const paymentSchema = z.object({
     .number({ invalid_type_error: 'Enter a valid amount' })
     .positive('Amount must be greater than zero')
     .max(100_000_000, 'Amount looks too large'),
+  /**
+   * What the student still owes once this payment is applied. Left out, the
+   * ledger subtracts the amount; given, it is taken as the truth, which is how
+   * a charge outside the school fee is settled without inventing a bill for it.
+   */
+  outstandingAfter: z.coerce.number().min(0, 'Outstanding cannot be negative').optional(),
   method: z.enum(['cash', 'bank_transfer', 'pos', 'cheque', 'online']).default('cash'),
   reference: z.string().trim().max(80).optional(),
   notes: z.string().trim().max(300).optional(),
@@ -38,7 +44,7 @@ export async function recordPayment(
     return failure('Please correct the highlighted fields', fieldErrorsOf(parsed.error));
   }
 
-  const { studentId, termId, amount, method, reference, notes } = parsed.data;
+  const { studentId, termId, amount, outstandingAfter, method, reference, notes } = parsed.data;
 
   try {
     const supabase = await createClient();
@@ -49,6 +55,7 @@ export async function recordPayment(
       p_method: method,
       p_reference: reference ?? null,
       p_notes: notes ?? null,
+      p_outstanding_after: outstandingAfter === undefined ? null : toKobo(outstandingAfter),
     });
 
     if (error) return failure(fromPostgrestError(error), { amount: fromPostgrestError(error) });
@@ -180,11 +187,18 @@ const arrearsSchema = z.object({
   classId: z.string().uuid(),
   arrears: z.coerce.number().min(0, 'Arrears cannot be negative'),
   currentBill: z.coerce.number().min(0, 'The bill cannot be negative'),
+  /** Blank re-derives from billed less paid; a number sets it outright. */
+  outstanding: z.union([z.coerce.number().min(0, 'Outstanding cannot be negative'), z.literal('')])
+    .optional(),
 });
 
 /**
- * Set a single student's two ledger legs directly — used when a bursar is
- * entering historic arrears alongside the current term's bill.
+ * Set one student's fee for the term, and optionally what they still owe.
+ *
+ * Goes through `set_student_fee` rather than writing the row directly: the
+ * outstanding figure is no longer arithmetic the database can redo for itself,
+ * so the decision of whether to re-derive it or take it as given belongs in one
+ * place.
  */
 export async function setStudentLedger(formData: FormData): Promise<ActionResult> {
   const parsed = arrearsSchema.safeParse({
@@ -193,36 +207,30 @@ export async function setStudentLedger(formData: FormData): Promise<ActionResult
     classId: formData.get('classId'),
     arrears: formData.get('arrears'),
     currentBill: formData.get('currentBill'),
+    outstanding: formData.get('outstanding') ?? undefined,
   });
 
   if (!parsed.success) {
     return failure('Please correct the highlighted fields', fieldErrorsOf(parsed.error));
   }
 
-  const { studentId, termId, classId, arrears, currentBill } = parsed.data;
+  const { studentId, termId, arrears, currentBill, outstanding } = parsed.data;
+  const balance = outstanding === '' || outstanding === undefined ? null : toKobo(outstanding);
 
   try {
     const supabase = await createClient();
-    const { error } = await supabase.from('fee_accounts').upsert(
-      {
-        student_id: studentId,
-        term_id: termId,
-        class_id: classId,
-        arrears: toKobo(arrears),
-        current_bill: toKobo(currentBill),
-      },
-      { onConflict: 'student_id,term_id' },
-    );
+    const { error } = await supabase.rpc('set_student_fee', {
+      p_student_id: studentId,
+      p_term_id: termId,
+      p_arrears: toKobo(arrears),
+      p_current_bill: toKobo(currentBill),
+      p_balance: balance,
+    });
 
-    if (error) {
-      // The not-overpaid constraint fires when a bill is cut below what was paid.
-      if (error.code === '23514') {
-        return failure('That would put the account below what has already been paid');
-      }
-      return failure(fromPostgrestError(error));
-    }
+    if (error) return failure(fromPostgrestError(error));
 
     revalidatePath('/fees');
+    revalidatePath('/students');
     return ok();
   } catch (error) {
     return failure(errorMessage(error, 'Could not update the ledger'));

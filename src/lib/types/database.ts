@@ -294,7 +294,11 @@ export interface Database {
           arrears: number;
           current_bill: number;
           total_paid: number;
-          /** Generated column: arrears + current_bill - total_paid. */
+          /**
+           * Set directly, not derived. Charges outside the school fee mean the
+           * true figure is the bursar's to state, so this is what the parent is
+           * told rather than arithmetic over the columns above.
+           */
           balance: number;
           created_at: string;
           updated_at: string;
@@ -306,6 +310,7 @@ export interface Database {
           arrears?: number;
           current_bill?: number;
           total_paid?: number;
+          balance?: number;
         };
         Update: Partial<Omit<Database['public']['Tables']['fee_accounts']['Insert'], 'student_id' | 'term_id'>>;
         Relationships: [
@@ -541,11 +546,51 @@ export interface Database {
         Update: Partial<Database['public']['Tables']['families']['Insert']>;
         Relationships: [];
       };
+      family_fee_accounts: {
+        Row: {
+          id: string;
+          family_id: string;
+          term_id: string;
+          arrears: number;
+          current_bill: number;
+          total_paid: number;
+          /** Set directly, like fee_accounts.balance. */
+          balance: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          family_id: string;
+          term_id: string;
+          arrears?: number;
+          current_bill?: number;
+          total_paid?: number;
+          balance?: number;
+        };
+        Update: Partial<Database['public']['Tables']['family_fee_accounts']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'family_fee_accounts_family_id_fkey';
+            columns: ['family_id'];
+            isOneToOne: false;
+            referencedRelation: 'families';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'family_fee_accounts_term_id_fkey';
+            columns: ['term_id'];
+            isOneToOne: false;
+            referencedRelation: 'terms';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       family_payments: {
         Row: {
           id: string;
           family_id: string;
           term_id: string;
+          account_id: string | null;
           receipt_number: string;
           total_amount: number;
           method: PaymentMethod;
@@ -561,6 +606,7 @@ export interface Database {
         Insert: {
           family_id: string;
           term_id: string;
+          account_id?: string | null;
           receipt_number: string;
           total_amount: number;
           method?: PaymentMethod;
@@ -602,6 +648,7 @@ export interface Database {
           outstanding: number;
           billed: number;
           paid: number;
+          account_id: string | null;
         };
         Relationships: [];
       };
@@ -611,14 +658,36 @@ export interface Database {
         Args: {
           p_family_id: string;
           p_term_id: string;
-          /** `[{ student_id, amount }]` — children receiving nothing may be omitted. */
-          p_allocations: Json;
+          p_amount: number;
           p_method?: PaymentMethod;
           p_reference?: string | null;
           p_notes?: string | null;
           p_paid_at?: string;
+          /** Null lets the ledger subtract; a number states what is still owed. */
+          p_outstanding_after?: number | null;
         };
         Returns: Database['public']['Tables']['family_payments']['Row'];
+      };
+      set_student_fee: {
+        Args: {
+          p_student_id: string;
+          p_term_id: string;
+          p_arrears: number;
+          p_current_bill: number;
+          /** Null re-derives from billed less paid; a number sets it outright. */
+          p_balance?: number | null;
+        };
+        Returns: Database['public']['Tables']['fee_accounts']['Row'];
+      };
+      set_family_fee: {
+        Args: {
+          p_family_id: string;
+          p_term_id: string;
+          p_arrears: number;
+          p_current_bill: number;
+          p_balance?: number | null;
+        };
+        Returns: Database['public']['Tables']['family_fee_accounts']['Row'];
       };
       set_student_family: {
         Args: { p_family_id: string | null; p_student_ids: string[] };
@@ -651,6 +720,8 @@ export interface Database {
           p_reference?: string | null;
           p_notes?: string | null;
           p_paid_at?: string;
+          /** Null lets the ledger subtract; a number states what is still owed. */
+          p_outstanding_after?: number | null;
         };
         Returns: Database['public']['Tables']['fee_payments']['Row'];
       };
@@ -741,6 +812,9 @@ export interface LedgerRow {
   currentBill: number;
   totalPaid: number;
   balance: number;
+  /** Set when this pupil is billed through a household instead of individually. */
+  familyId: string | null;
+  familyName: string | null;
 }
 
 /** Everything a receipt needs to render without further fetching. */

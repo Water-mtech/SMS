@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { FamilyReceipt } from '@/components/fees/family-receipt';
@@ -9,13 +9,6 @@ import { SelectInput, TextArea, TextInput } from '@/components/ui/field';
 import { Modal } from '@/components/ui/overlay';
 import { Alert } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
-import {
-  allocationTotal,
-  suggestAllocation,
-  validateAllocation,
-  roundKobo,
-  type Allocation,
-} from '@/lib/fees/allocate';
 import type { FamilyReceiptData } from '@/lib/fees/family-receipt';
 import { PAYMENT_METHOD_OPTIONS, formatNaira, toAmount, toKobo } from '@/lib/format';
 import type { PaymentMethod, TermLabel } from '@/lib/types/database';
@@ -28,6 +21,7 @@ interface FamilyPaymentModalProps {
   familyId: string;
   familyName: string;
   pupils: FamilyChild[];
+  outstanding: number;
   termId: string;
   termLabel: TermLabel;
   sessionName: string;
@@ -36,10 +30,10 @@ interface FamilyPaymentModalProps {
 /**
  * Take one payment for a whole household.
  *
- * The bursar types the total once and the split is proposed for them, largest
- * debt first; every line stays editable because only the parent knows whose
- * fees the money is meant for. The family remainder recalculates as they go, so
- * what the parent is told matches what will be written.
+ * Two figures, both the bursar's: what was handed over, and what is still owed
+ * afterwards. The second is suggested by subtraction and then left alone —
+ * there are charges outside the school fee, so a parent can pay more than the
+ * bill and still owe, and only the person at the desk knows which.
  */
 export function FamilyPaymentModal({
   open,
@@ -47,6 +41,7 @@ export function FamilyPaymentModal({
   familyId,
   familyName,
   pupils,
+  outstanding,
   termId,
   termLabel,
   sessionName,
@@ -54,9 +49,9 @@ export function FamilyPaymentModal({
   const router = useRouter();
   const { toast } = useToast();
 
-  const [totalInput, setTotalInput] = useState('');
-  const [allocation, setAllocation] = useState<Allocation>({});
-  // Once a line is hand-edited the suggestion stops overwriting the boxes.
+  const [amountInput, setAmountInput] = useState('');
+  const [outstandingInput, setOutstandingInput] = useState('');
+  // Once the outstanding box is typed in, subtraction stops overwriting it.
   const [touched, setTouched] = useState(false);
   const [method, setMethod] = useState<PaymentMethod>('cash');
   const [reference, setReference] = useState('');
@@ -65,63 +60,36 @@ export function FamilyPaymentModal({
   const [receipt, setReceipt] = useState<FamilyReceiptData | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const payable = useMemo(() => pupils.filter((child) => child.balance > 0), [pupils]);
-  const familyDue = useMemo(
-    () => roundKobo(payable.reduce((sum, child) => sum + child.balance, 0)),
-    [payable],
-  );
+  useEffect(() => {
+    if (open) setOutstandingInput(String(outstanding));
+  }, [open, outstanding]);
 
-  const allocated = allocationTotal(allocation);
-  const remainingToAllocate = roundKobo(toKobo(toAmount(totalInput)) - allocated);
-  const familyAfter = roundKobo(familyDue - allocated);
+  const amount = toKobo(toAmount(amountInput));
+  const nextOutstanding = toKobo(toAmount(outstandingInput));
+  const clears = nextOutstanding <= 0;
+  const overpaying = amount > outstanding;
 
-  const nameOf = (studentId: string) =>
-    payable.find((child) => child.studentId === studentId)?.fullName ?? 'This pupil';
-
-  const problems = validateAllocation(
-    payable.map((child) => ({ studentId: child.studentId, balance: child.balance })),
-    allocation,
-    nameOf,
-  );
-
-  /** Typing the total re-proposes the split, until a line is edited by hand. */
-  function onTotalChange(value: string) {
-    setTotalInput(value);
+  function onAmountChange(value: string) {
+    setAmountInput(value);
     setError(null);
     if (touched) return;
-    setAllocation(
-      suggestAllocation(
-        payable.map((child) => ({ studentId: child.studentId, balance: child.balance })),
-        toKobo(toAmount(value)),
-      ),
-    );
+    setOutstandingInput(String(Math.max(toKobo(outstanding - toKobo(toAmount(value))), 0)));
   }
 
-  function onLineChange(studentId: string, value: string) {
+  function onOutstandingChange(value: string) {
     setTouched(true);
     setError(null);
-    setAllocation((current) => {
-      const next = { ...current };
-      const amount = toKobo(toAmount(value));
-      if (value.trim() === '' || amount === 0) delete next[studentId];
-      else next[studentId] = amount;
-      return next;
-    });
+    setOutstandingInput(value);
   }
 
-  function redistribute() {
+  function resubtract() {
     setTouched(false);
-    setAllocation(
-      suggestAllocation(
-        payable.map((child) => ({ studentId: child.studentId, balance: child.balance })),
-        toKobo(toAmount(totalInput)),
-      ),
-    );
+    setOutstandingInput(String(Math.max(toKobo(outstanding - amount), 0)));
   }
 
   function reset() {
-    setTotalInput('');
-    setAllocation({});
+    setAmountInput('');
+    setOutstandingInput(String(outstanding));
     setTouched(false);
     setMethod('cash');
     setReference('');
@@ -139,16 +107,12 @@ export function FamilyPaymentModal({
   function submit() {
     setError(null);
 
-    const lines = Object.entries(allocation)
-      .filter(([, amount]) => amount > 0)
-      .map(([studentId, amount]) => ({ studentId, amount: roundKobo(amount) }));
-
-    if (lines.length === 0) {
-      setError('Enter an amount for at least one pupil');
+    if (amount <= 0) {
+      setError('Enter an amount greater than zero');
       return;
     }
-    if (problems.length > 0) {
-      setError(problems[0]?.message ?? 'Check the amounts');
+    if (nextOutstanding < 0) {
+      setError('Outstanding cannot be negative');
       return;
     }
 
@@ -156,7 +120,8 @@ export function FamilyPaymentModal({
       const result = await recordFamilyPayment({
         familyId,
         termId,
-        allocations: lines,
+        amount,
+        outstandingAfter: nextOutstanding,
         method,
         reference: reference.trim() || undefined,
         notes: notes.trim() || undefined,
@@ -167,25 +132,17 @@ export function FamilyPaymentModal({
         return;
       }
 
-      // Build the slip from what was sent plus the balances we already hold:
-      // the payload carries the family totals, the per-child lines come from
-      // the ledger rows on screen.
       setReceipt({
         ...result.data,
         familyName,
         termLabel,
         sessionName,
-        lines: lines.map((line) => {
-          const child = payable.find((item) => item.studentId === line.studentId);
-          return {
-            studentId: line.studentId,
-            studentName: child?.fullName ?? '—',
-            admissionNumber: child?.admissionNumber ?? '—',
-            className: child?.className ?? '—',
-            amountPaid: line.amount,
-            balanceAfter: roundKobo((child?.balance ?? 0) - line.amount),
-          };
-        }),
+        lines: pupils.map((child) => ({
+          studentId: child.studentId,
+          studentName: child.fullName,
+          admissionNumber: child.admissionNumber,
+          className: child.className,
+        })),
       });
       toast(`Receipt ${result.data.receiptNumber} issued`, 'success');
     });
@@ -216,24 +173,26 @@ export function FamilyPaymentModal({
       open={open}
       onClose={close}
       title="Record family payment"
-      description={`${familyName} · ${payable.length} pupil(s) owing`}
+      description={`${familyName} · ${pupils.length} pupil(s)`}
       footer={
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Family outstanding after</p>
-            <p className="text-base font-semibold text-slate-900">
-              {formatNaira(Math.max(familyAfter, 0))}
+            <p className="text-xs uppercase tracking-wide text-slate-500">Outstanding after</p>
+            <p
+              className={
+                clears
+                  ? 'text-base font-semibold text-brand-700'
+                  : 'text-base font-semibold text-slate-900'
+              }
+            >
+              {formatNaira(Math.max(nextOutstanding, 0))}
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={close} disabled={pending}>
               Cancel
             </Button>
-            <Button
-              onClick={submit}
-              loading={pending}
-              disabled={allocated <= 0 || problems.length > 0}
-            >
+            <Button onClick={submit} loading={pending} disabled={amount <= 0}>
               Record &amp; issue receipt
             </Button>
           </div>
@@ -243,120 +202,81 @@ export function FamilyPaymentModal({
       <div className="space-y-4">
         {error && <Alert>{error}</Alert>}
 
-        {payable.length === 0 ? (
-          <Alert tone="success">
-            Every child in this family is fully paid up for {termLabel.replace('_', ' ')}.
+        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-slate-200 bg-slate-200 text-center">
+          <Figure label="Currently owing" value={formatNaira(outstanding)} emphasis />
+          <Figure label="Children" value={String(pupils.length)} />
+        </dl>
+
+        <TextInput
+          label="Amount received"
+          inputMode="decimal"
+          autoFocus
+          value={amountInput}
+          onChange={(event) => onAmountChange(event.target.value)}
+          placeholder="0.00"
+          hint="Record what the parent actually handed over"
+        />
+
+        <div>
+          <TextInput
+            label="Outstanding after this payment"
+            inputMode="decimal"
+            value={outstandingInput}
+            onChange={(event) => onOutstandingChange(event.target.value)}
+            placeholder="0.00"
+            hint="Suggested by subtraction — change it if other charges are still owed"
+          />
+          {touched && (
+            <div className="mt-1.5 flex justify-end">
+              <Button variant="outline" size="sm" onClick={resubtract}>
+                Reset to {formatNaira(Math.max(toKobo(outstanding - amount), 0))}
+              </Button>
+            </div>
+          )}
+        </div>
+
+        {amount > 0 && (
+          <Alert tone={clears ? 'success' : 'info'}>
+            Paying <strong>{formatNaira(amount)}</strong>
+            {overpaying && ' — more than the recorded fee'} leaves the family owing{' '}
+            <strong>{formatNaira(Math.max(nextOutstanding, 0))}</strong>
+            {clears ? ' — fully cleared.' : '.'}
           </Alert>
-        ) : (
-          <>
-            <TextInput
-              label="Total amount received"
-              inputMode="decimal"
-              autoFocus
-              value={totalInput}
-              onChange={(event) => onTotalChange(event.target.value)}
-              placeholder="0.00"
-              hint={`The family owes ${formatNaira(familyDue)} in total`}
-            />
-
-            <div className="overflow-hidden rounded-lg border border-slate-200">
-              <table className="w-full border-collapse text-sm">
-                <caption className="sr-only">How the payment is split between the children.</caption>
-                <thead>
-                  <tr className="border-b border-slate-200 bg-slate-50 text-left">
-                    <th scope="col" className="px-3 py-2 font-semibold text-slate-700">Pupil</th>
-                    <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Owing</th>
-                    <th scope="col" className="px-3 py-2 text-right font-semibold text-slate-700">Paying</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payable.map((child) => {
-                    const value = allocation[child.studentId];
-                    const invalid = problems.some((item) => item.studentId === child.studentId);
-                    return (
-                      <tr key={child.studentId} className="border-b border-slate-100 last:border-0">
-                        <td className="px-3 py-2">
-                          <span className="block text-slate-900">{child.fullName}</span>
-                          <span className="block text-xs text-slate-500">{child.className}</span>
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums text-slate-600">
-                          {formatNaira(child.balance)}
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            aria-label={`Amount for ${child.fullName}`}
-                            value={value === undefined ? '' : String(value)}
-                            onChange={(event) => onLineChange(child.studentId, event.target.value)}
-                            placeholder="0"
-                            className={
-                              invalid
-                                ? 'w-28 rounded-md border border-red-400 px-2 py-1 text-right tabular-nums focus:border-red-500 focus:outline-none focus:ring-2 focus:ring-red-200'
-                                : 'w-28 rounded-md border border-slate-300 px-2 py-1 text-right tabular-nums focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-200'
-                            }
-                          />
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-              <p className="text-slate-600">
-                Allocated <strong className="text-slate-900">{formatNaira(allocated)}</strong>
-                {totalInput.trim() !== '' && remainingToAllocate !== 0 && (
-                  <span className={remainingToAllocate > 0 ? 'text-amber-700' : 'text-red-600'}>
-                    {' '}
-                    · {remainingToAllocate > 0 ? 'unallocated' : 'over the total by'}{' '}
-                    {formatNaira(Math.abs(remainingToAllocate))}
-                  </span>
-                )}
-              </p>
-              {touched && (
-                <Button variant="outline" size="sm" onClick={redistribute}>
-                  Re-split evenly from the total
-                </Button>
-              )}
-            </div>
-
-            {problems.length > 0 && <Alert>{problems[0]?.message}</Alert>}
-
-            {allocated > 0 && problems.length === 0 && (
-              <Alert tone={familyAfter <= 0 ? 'success' : 'info'}>
-                Paying <strong>{formatNaira(allocated)}</strong> of{' '}
-                <strong>{formatNaira(familyDue)}</strong> leaves the family owing{' '}
-                <strong>{formatNaira(Math.max(familyAfter, 0))}</strong>
-                {familyAfter <= 0 ? ' — every child is cleared.' : '.'}
-              </Alert>
-            )}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <SelectInput
-                label="Payment method"
-                value={method}
-                onChange={(event) => setMethod(event.target.value as PaymentMethod)}
-                options={PAYMENT_METHOD_OPTIONS}
-              />
-              <TextInput
-                label="Reference"
-                value={reference}
-                onChange={(event) => setReference(event.target.value)}
-                placeholder="Teller or transfer reference"
-              />
-            </div>
-
-            <TextArea
-              label="Notes"
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder="Optional note kept on every slip in this payment"
-            />
-          </>
         )}
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SelectInput
+            label="Payment method"
+            value={method}
+            onChange={(event) => setMethod(event.target.value as PaymentMethod)}
+            options={PAYMENT_METHOD_OPTIONS}
+          />
+          <TextInput
+            label="Reference"
+            value={reference}
+            onChange={(event) => setReference(event.target.value)}
+            placeholder="Teller or transfer reference"
+          />
+        </div>
+
+        <TextArea
+          label="Notes"
+          value={notes}
+          onChange={(event) => setNotes(event.target.value)}
+          placeholder="Optional — what the extra charges were, for instance"
+        />
       </div>
     </Modal>
+  );
+}
+
+function Figure({ label, value, emphasis = false }: { label: string; value: string; emphasis?: boolean }) {
+  return (
+    <div className="bg-white px-2 py-3">
+      <dt className="text-[11px] uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd className={emphasis ? 'mt-0.5 text-sm font-bold text-slate-900' : 'mt-0.5 text-sm text-slate-700'}>
+        {value}
+      </dd>
+    </div>
   );
 }

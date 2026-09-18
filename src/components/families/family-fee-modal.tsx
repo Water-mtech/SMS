@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
+import { useEffect, useState, useTransition } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { TextInput } from '@/components/ui/field';
@@ -9,89 +9,99 @@ import { Modal } from '@/components/ui/overlay';
 import { Alert } from '@/components/ui/primitives';
 import { useToast } from '@/components/ui/toast';
 import { formatNaira, toAmount, toKobo } from '@/lib/format';
-import type { LedgerRow } from '@/lib/types/database';
-import { setStudentLedger } from '@/server/actions/fees';
+import { setFamilyFee } from '@/server/actions/families';
 
-interface LedgerEditModalProps {
+interface FamilyFeeModalProps {
   open: boolean;
-  row: LedgerRow | null;
-  termId: string;
-  classId: string;
   onClose: () => void;
+  familyId: string;
+  familyName: string;
+  termId: string;
+  arrears: number;
+  currentBill: number;
+  totalPaid: number;
+  outstanding: number;
+  /** False when the household has no fee for this term yet. */
+  hasFee: boolean;
 }
 
 /**
- * Set one pupil's fee for the term, and what they still owe.
+ * Set what a household owes for the term.
  *
- * Outstanding is offered as billed less paid and can be overwritten. That is
- * deliberate: charges outside the school fee belong in the outstanding figure
- * rather than being smuggled into the bill, where they would misreport what the
- * term actually costs.
+ * No class structure sits behind this — a family spans classes, so its fee is
+ * whatever the school agreed with that parent. Outstanding is offered as billed
+ * less paid and can be overwritten, which is the whole point: charges the ledger
+ * never saw are entered here rather than being invented as a bill.
  */
-export function LedgerEditModal({ open, row, termId, classId, onClose }: LedgerEditModalProps) {
+export function FamilyFeeModal({
+  open,
+  onClose,
+  familyId,
+  familyName,
+  termId,
+  arrears,
+  currentBill,
+  totalPaid,
+  outstanding,
+  hasFee,
+}: FamilyFeeModalProps) {
   const router = useRouter();
   const { toast } = useToast();
-  const [arrears, setArrears] = useState('0');
-  const [currentBill, setCurrentBill] = useState('0');
-  const [outstanding, setOutstanding] = useState('0');
-  // Once the outstanding box is typed in, the other two stop overwriting it.
+
+  const [arrearsInput, setArrearsInput] = useState('0');
+  const [billInput, setBillInput] = useState('0');
+  const [outstandingInput, setOutstandingInput] = useState('');
   const [touched, setTouched] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   useEffect(() => {
-    if (open && row) {
-      setArrears(String(row.arrears));
-      setCurrentBill(String(row.currentBill));
-      setOutstanding(String(row.balance));
-      setTouched(false);
-      setError(null);
-    }
-  }, [open, row]);
+    if (!open) return;
+    setArrearsInput(String(arrears));
+    setBillInput(String(currentBill));
+    setOutstandingInput(String(outstanding));
+    setTouched(false);
+    setError(null);
+  }, [open, arrears, currentBill, outstanding]);
 
-  const total = toKobo(toAmount(arrears) + toAmount(currentBill));
-  const paid = row?.totalPaid ?? 0;
-  const derived = Math.max(toKobo(total - paid), 0);
-  const balance = toKobo(toAmount(outstanding));
+  const billed = toKobo(toAmount(arrearsInput) + toAmount(billInput));
+  const derived = Math.max(toKobo(billed - totalPaid), 0);
+  const nextOutstanding = toKobo(toAmount(outstandingInput));
 
   /** Editing either billed figure re-suggests outstanding, until it is typed in. */
   function onBilledChange(field: 'arrears' | 'bill', value: string) {
-    if (field === 'arrears') setArrears(value);
-    else setCurrentBill(value);
+    if (field === 'arrears') setArrearsInput(value);
+    else setBillInput(value);
     setError(null);
     if (touched) return;
 
-    const nextTotal =
+    const nextBilled =
       field === 'arrears'
-        ? toKobo(toAmount(value) + toAmount(currentBill))
-        : toKobo(toAmount(arrears) + toAmount(value));
-    setOutstanding(String(Math.max(toKobo(nextTotal - paid), 0)));
+        ? toKobo(toAmount(value) + toAmount(billInput))
+        : toKobo(toAmount(arrearsInput) + toAmount(value));
+    setOutstandingInput(String(Math.max(toKobo(nextBilled - totalPaid), 0)));
   }
 
   function submit() {
-    if (!row) return;
     setError(null);
-
-    if (balance < 0) {
+    if (nextOutstanding < 0) {
       setError('Outstanding cannot be negative');
       return;
     }
 
-    const formData = new FormData();
-    formData.set('studentId', row.studentId);
-    formData.set('termId', termId);
-    formData.set('classId', classId);
-    formData.set('arrears', String(toAmount(arrears)));
-    formData.set('currentBill', String(toAmount(currentBill)));
-    formData.set('outstanding', String(toAmount(outstanding)));
-
     startTransition(async () => {
-      const result = await setStudentLedger(formData);
+      const result = await setFamilyFee({
+        familyId,
+        termId,
+        arrears: toAmount(arrearsInput),
+        currentBill: toAmount(billInput),
+        outstanding: toAmount(outstandingInput),
+      });
       if (!result.ok) {
         setError(result.error);
         return;
       }
-      toast(`Ledger updated for ${row.fullName}`, 'success');
+      toast(hasFee ? 'Family fee updated' : 'Family fee set', 'success');
       router.refresh();
       onClose();
     });
@@ -101,14 +111,14 @@ export function LedgerEditModal({ open, row, termId, classId, onClose }: LedgerE
     <Modal
       open={open}
       onClose={onClose}
-      title="Set fee"
-      description={row ? `${row.fullName} · ${row.admissionNumber}` : undefined}
+      title={hasFee ? 'Edit family fee' : 'Set family fee'}
+      description={`${familyName} — one fee for the whole household, across every class.`}
       footer={
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm">
-            <p className="text-xs uppercase tracking-wide text-slate-500">New balance</p>
+            <p className="text-xs uppercase tracking-wide text-slate-500">Outstanding</p>
             <p className="text-base font-semibold text-slate-900">
-              {formatNaira(Math.max(balance, 0))}
+              {formatNaira(Math.max(nextOutstanding, 0))}
             </p>
           </div>
           <div className="flex gap-2">
@@ -116,7 +126,7 @@ export function LedgerEditModal({ open, row, termId, classId, onClose }: LedgerE
               Cancel
             </Button>
             <Button onClick={submit} loading={pending}>
-              Save ledger
+              Save fee
             </Button>
           </div>
         </div>
@@ -128,38 +138,39 @@ export function LedgerEditModal({ open, row, termId, classId, onClose }: LedgerE
         <TextInput
           label="Brought forward"
           inputMode="decimal"
-          value={arrears}
+          value={arrearsInput}
           onChange={(event) => onBilledChange('arrears', event.target.value)}
-          hint="Everything carried over from previous terms"
+          hint="Anything still owed from previous terms"
         />
         <TextInput
           label="This term's fee"
           inputMode="decimal"
-          value={currentBill}
+          autoFocus
+          value={billInput}
           onChange={(event) => onBilledChange('bill', event.target.value)}
-          hint="What this term itself costs for this pupil"
+          hint="What the school agreed with this family for the term"
         />
 
         <div>
           <TextInput
             label="Outstanding"
             inputMode="decimal"
-            value={outstanding}
+            value={outstandingInput}
             onChange={(event) => {
               setTouched(true);
               setError(null);
-              setOutstanding(event.target.value);
+              setOutstandingInput(event.target.value);
             }}
             hint="Add charges outside the school fee here rather than inflating the fee itself"
           />
-          {touched && balance !== derived && (
+          {touched && nextOutstanding !== derived && (
             <div className="mt-1.5 flex justify-end">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => {
                   setTouched(false);
-                  setOutstanding(String(derived));
+                  setOutstandingInput(String(derived));
                 }}
               >
                 Reset to {formatNaira(derived)}
@@ -169,9 +180,9 @@ export function LedgerEditModal({ open, row, termId, classId, onClose }: LedgerE
         </div>
 
         <dl className="space-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm">
-          <Row label="Total billed" value={formatNaira(total)} />
-          <Row label="Already paid" value={formatNaira(paid)} />
-          <Row label="Outstanding" value={formatNaira(Math.max(balance, 0))} strong />
+          <Row label="Total billed" value={formatNaira(billed)} />
+          <Row label="Already paid" value={formatNaira(totalPaid)} />
+          <Row label="Outstanding" value={formatNaira(Math.max(nextOutstanding, 0))} strong />
         </dl>
       </div>
     </Modal>

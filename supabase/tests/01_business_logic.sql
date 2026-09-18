@@ -53,16 +53,37 @@ select receipt_number, amount, balance_before, balance_after
     (select id from public.terms where is_current),
     20000, 'cash', 'TELLER-99', 'part payment');
 
-\echo '=== 6. Overpayment must be rejected ==='
+\echo '=== 6. Paying more than the bill is recorded in full ==='
+-- Charges outside the school fee mean a parent legitimately hands over more
+-- than the ledger knows about. The receipt must say what was received, and the
+-- outstanding figure settles at zero rather than going negative.
 do $$
+declare
+  v_amount numeric;
+  v_after numeric;
+  v_paid_before numeric;
+  v_paid numeric;
 begin
-  perform public.record_fee_payment(
-    (select id from public.students where admission_number = 'BFS/002'),
-    (select id from public.terms where is_current),
-    999999);
-  raise exception 'FAIL: overpayment was accepted';
-exception when check_violation then
-  raise notice 'PASS: overpayment rejected -> %', sqlerrm;
+  -- Measured as a delta, so the assertion holds even on a database this suite
+  -- has already been run against.
+  select total_paid into v_paid_before from public.fee_accounts
+   where student_id = (select id from public.students where admission_number = 'BFS/002');
+
+  select amount, balance_after into v_amount, v_after
+    from public.record_fee_payment(
+      (select id from public.students where admission_number = 'BFS/002'),
+      (select id from public.terms where is_current),
+      999999);
+
+  select total_paid into v_paid from public.fee_accounts
+   where student_id = (select id from public.students where admission_number = 'BFS/002');
+
+  if v_amount = 999999 and v_after = 0 and v_paid - v_paid_before = 999999 then
+    raise notice 'PASS: an overpayment is kept at its full amount and clears the balance';
+  else
+    raise notice 'FAIL: amount %, outstanding %, added to paid %',
+      v_amount, v_after, v_paid - v_paid_before;
+  end if;
 end $$;
 
 \echo '=== 7. Void the payment, ledger restored ==='
