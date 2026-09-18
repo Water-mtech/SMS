@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 
 const files = [
   'src/lib/__tests__/retry-fetch.test.mjs',
+  'src/lib/__tests__/query-error.test.mjs',
   'src/lib/__tests__/quantity.test.mjs',
   'src/lib/__tests__/roster-classes.test.mjs',
   'src/lib/__tests__/overlay-focus.test.tsx',

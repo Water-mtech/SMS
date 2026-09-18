@@ -5,7 +5,8 @@ import { FamilyFormModal } from '@/components/families/family-form-modal';
 import { buttonStyles } from '@/components/ui/button';
 import { Alert, Badge, Card, EmptyState, PageHeader } from '@/components/ui/primitives';
 import { formatNaira } from '@/lib/format';
-import { getCurrentProfile, listFamilies } from '@/server/queries';
+import { errorMessage } from '@/lib/utils';
+import { getCurrentProfile, listFamilies, type FamilySummary } from '@/server/queries';
 
 export const metadata: Metadata = { title: 'Families' };
 
@@ -15,8 +16,19 @@ interface PageProps {
 
 export default async function FamiliesPage({ searchParams }: PageProps) {
   const params = await searchParams;
-  const [families, profile] = await Promise.all([listFamilies(params.q), getCurrentProfile()]);
+  const profile = await getCurrentProfile();
   const canManage = profile?.role === 'admin' || profile?.role === 'bursar';
+
+  // Caught here rather than left to the error boundary: production replaces an
+  // uncaught Server Component error with a generic string, which tells the
+  // operator nothing. Rendering the reason keeps the page usable.
+  let families: FamilySummary[] = [];
+  let loadError: string | null = null;
+  try {
+    families = await listFamilies(params.q);
+  } catch (error) {
+    loadError = errorMessage(error);
+  }
 
   const totalOutstanding = families.reduce((sum, family) => sum + family.outstanding, 0);
 
@@ -58,7 +70,14 @@ export default async function FamiliesPage({ searchParams }: PageProps) {
         </form>
       </Card>
 
-      {families.length === 0 ? (
+      {loadError !== null ? (
+        <Card className="p-5">
+          <Alert>
+            <p className="font-medium">Families could not be loaded.</p>
+            <p className="mt-1 break-words font-mono text-xs">{loadError}</p>
+          </Alert>
+        </Card>
+      ) : families.length === 0 ? (
         <EmptyState
           title={params.q ? 'No families match that search' : 'No families yet'}
           description={

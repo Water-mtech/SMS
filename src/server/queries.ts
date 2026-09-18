@@ -4,6 +4,7 @@ import { cache } from 'react';
 
 import { createClient } from '@/lib/supabase/server';
 import { toAmount } from '@/lib/format';
+import { describeQueryError, type QueryError } from '@/lib/query-error';
 import type {
   ClassWithSection,
   FeePayment,
@@ -24,30 +25,8 @@ import type {
  * list in three different components still issues a single query per request.
  */
 
-/**
- * PostgrestError carries `code`, `details` and `hint` alongside `message`, and
- * those are usually the parts that identify the problem (a missing column, a
- * relationship PostgREST could not resolve). Dropping them leaves a production
- * log line that says nothing actionable, so fold them all into the message.
- */
-interface QueryError {
-  message: string;
-  code?: string | null;
-  details?: string | null;
-  hint?: string | null;
-}
-
-function describeError(error: QueryError | null): string {
-  if (!error) return 'unknown error';
-  const parts = [error.message];
-  if (error.code) parts.push(`(code ${error.code})`);
-  if (error.details) parts.push(`— ${error.details}`);
-  if (error.hint) parts.push(`hint: ${error.hint}`);
-  return parts.join(' ');
-}
-
 function fail(context: string, error: QueryError | null): never {
-  throw new Error(`${context}: ${describeError(error)}`);
+  throw new Error(`${context}: ${describeQueryError(error)}`);
 }
 
 export const getCurrentProfile = cache(async (): Promise<Profile | null> => {
@@ -503,7 +482,10 @@ export interface FamilyDetail {
   email: string | null;
   notes: string | null;
   children: FamilyChild[];
-  /** The household's own ledger for the term. */
+}
+
+/** A household's own ledger for one term. */
+export interface FamilyLedger {
   arrears: number;
   currentBill: number;
   totalPaid: number;
@@ -512,10 +494,9 @@ export interface FamilyDetail {
   hasFee: boolean;
 }
 
-/** One household with every child's ledger for the given term. */
+/** One household and the children its fee covers. */
 export const getFamily = cache(async function getFamily(
   familyId: string,
-  termId: string,
 ): Promise<FamilyDetail | null> {
   const supabase = await createClient();
 
@@ -527,22 +508,13 @@ export const getFamily = cache(async function getFamily(
   if (familyError) fail('Failed to load the family', familyError);
   if (!family) return null;
 
-  const [{ data, error }, { data: account, error: accountError }] = await Promise.all([
-    supabase
-      .from('students')
-      .select('id, admission_number, first_name, last_name, middle_name, class:classes(name, promotion_order)')
-      .eq('family_id', familyId)
-      .is('archived_at', null)
-      .eq('status', 'active'),
-    supabase
-      .from('family_fee_accounts')
-      .select('arrears, current_bill, total_paid, balance')
-      .eq('family_id', familyId)
-      .eq('term_id', termId)
-      .maybeSingle(),
-  ]);
+  const { data, error } = await supabase
+    .from('students')
+    .select('id, admission_number, first_name, last_name, middle_name, class:classes(name, promotion_order)')
+    .eq('family_id', familyId)
+    .is('archived_at', null)
+    .eq('status', 'active');
   if (error) fail("Failed to load the family's children", error);
-  if (accountError) fail("Failed to load the family's ledger", accountError);
 
   type Raw = {
     id: string;
@@ -570,6 +542,31 @@ export const getFamily = cache(async function getFamily(
     email: family.email,
     notes: family.notes,
     children,
+  };
+});
+
+/**
+ * What the household was billed and has paid this term.
+ *
+ * Loaded apart from the family itself so the page can still show the household,
+ * its children and its receipts when only this fails — which is what happens
+ * when the ledger table has not been migrated in yet.
+ */
+export const getFamilyLedger = cache(async function getFamilyLedger(
+  familyId: string,
+  termId: string,
+): Promise<FamilyLedger> {
+  const supabase = await createClient();
+
+  const { data: account, error } = await supabase
+    .from('family_fee_accounts')
+    .select('arrears, current_bill, total_paid, balance')
+    .eq('family_id', familyId)
+    .eq('term_id', termId)
+    .maybeSingle();
+  if (error) fail("Failed to load the family's ledger", error);
+
+  return {
     arrears: toAmount(account?.arrears ?? 0),
     currentBill: toAmount(account?.current_bill ?? 0),
     totalPaid: toAmount(account?.total_paid ?? 0),

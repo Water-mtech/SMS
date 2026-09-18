@@ -25,6 +25,8 @@ interface FamilyChildrenPanelProps {
   totalPaid: number;
   outstanding: number;
   hasFee: boolean;
+  /** Set when the household's ledger could not be read at all. */
+  ledgerError?: string | null;
   termId: string;
   termLabel: TermLabel;
   sessionName: string;
@@ -44,6 +46,7 @@ export function FamilyChildrenPanel({
   totalPaid,
   outstanding,
   hasFee,
+  ledgerError = null,
   termId,
   termLabel,
   sessionName,
@@ -88,7 +91,12 @@ export function FamilyChildrenPanel({
               <UserPlus className="h-3.5 w-3.5" aria-hidden="true" />
               Add children
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setSettingFee(true)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingFee(true)}
+              disabled={ledgerError !== null}
+            >
               <Pencil className="h-3.5 w-3.5" aria-hidden="true" />
               {hasFee ? 'Edit fee' : 'Set fee'}
             </Button>
@@ -100,7 +108,14 @@ export function FamilyChildrenPanel({
         )}
       </div>
 
-      {!hasFee ? (
+      {ledgerError !== null ? (
+        <div className="p-4">
+          <Alert>
+            <p className="font-medium">This household&rsquo;s fees could not be loaded.</p>
+            <p className="mt-1 break-words font-mono text-xs">{ledgerError}</p>
+          </Alert>
+        </div>
+      ) : !hasFee ? (
         <div className="p-4">
           <Alert tone="warning">
             No fee has been set for this household yet. Set one before taking a payment.
