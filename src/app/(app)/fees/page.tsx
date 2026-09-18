@@ -1,8 +1,12 @@
 import type { Metadata } from 'next';
 
+import Link from 'next/link';
+import { Users2 } from 'lucide-react';
+
 import { QuerySelect } from '@/components/filters/query-select';
 import { ApplyStructureButton } from '@/components/fees/apply-structure-button';
 import { LedgerTable } from '@/components/fees/ledger-table';
+import { buttonStyles } from '@/components/ui/button';
 import { Alert, Card, PageHeader } from '@/components/ui/primitives';
 import { formatTerm } from '@/lib/format';
 import {
@@ -101,7 +105,15 @@ async function LedgerPanel({
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-3">
         <h2 className="text-sm font-semibold text-slate-900">{className} ledger</h2>
-        <ApplyStructureButton classId={classId} termId={termId} />
+        <div className="flex flex-wrap gap-2">
+          {/* Siblings sit in different classes, so a family payment starts from
+              the family rather than from any one class ledger. */}
+          <Link href="/families" className={buttonStyles({ variant: 'outline', size: 'sm' })}>
+            <Users2 className="h-3.5 w-3.5" aria-hidden="true" />
+            Pay as family
+          </Link>
+          <ApplyStructureButton classId={classId} termId={termId} />
+        </div>
       </div>
       <LedgerTable
         rows={rows}

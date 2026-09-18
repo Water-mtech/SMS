@@ -441,3 +441,215 @@ export async function getPromotionHistory(limit = 20) {
     to_class: { name: string } | null;
   }[];
 }
+
+// -----------------------------------------------------------------------------
+// Families
+// -----------------------------------------------------------------------------
+
+export interface FamilySummary {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  children: number;
+  outstanding: number;
+}
+
+/** Every household with its combined outstanding, the most owing first. */
+export const listFamilies = cache(async function listFamilies(
+  search?: string,
+): Promise<FamilySummary[]> {
+  const supabase = await createClient();
+  let query = supabase
+    .from('family_balances')
+    .select('family_id, name, phone, email, children, outstanding');
+
+  const term = search?.trim();
+  if (term) query = query.or(`name.ilike.%${term}%,phone.ilike.%${term}%`);
+
+  const { data, error } = await query.order('outstanding', { ascending: false }).order('name');
+  if (error) fail('Failed to load families', error);
+
+  return (data ?? []).map((row) => ({
+    id: row.family_id,
+    name: row.name,
+    phone: row.phone,
+    email: row.email,
+    children: Number(row.children ?? 0),
+    outstanding: toAmount(row.outstanding ?? 0),
+  }));
+});
+
+export interface FamilyChild {
+  studentId: string;
+  admissionNumber: string;
+  fullName: string;
+  className: string;
+  arrears: number;
+  currentBill: number;
+  totalPaid: number;
+  balance: number;
+  /** False when nobody has billed this child for the term yet. */
+  hasAccount: boolean;
+}
+
+export interface FamilyDetail {
+  id: string;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+  children: FamilyChild[];
+  outstanding: number;
+}
+
+/** One household with every child's ledger for the given term. */
+export const getFamily = cache(async function getFamily(
+  familyId: string,
+  termId: string,
+): Promise<FamilyDetail | null> {
+  const supabase = await createClient();
+
+  const { data: family, error: familyError } = await supabase
+    .from('families')
+    .select('id, name, phone, email, notes')
+    .eq('id', familyId)
+    .maybeSingle();
+  if (familyError) fail('Failed to load the family', familyError);
+  if (!family) return null;
+
+  const { data, error } = await supabase
+    .from('students')
+    .select(
+      `id, admission_number, first_name, last_name, middle_name,
+       class:classes(name, promotion_order),
+       fee_accounts(id, term_id, arrears, current_bill, total_paid, balance)`,
+    )
+    .eq('family_id', familyId)
+    .is('archived_at', null)
+    .eq('status', 'active')
+    .eq('fee_accounts.term_id', termId);
+  if (error) fail("Failed to load the family's children", error);
+
+  type Raw = {
+    id: string;
+    admission_number: string;
+    first_name: string;
+    last_name: string;
+    middle_name: string | null;
+    class: { name: string; promotion_order: number } | null;
+    fee_accounts: {
+      id: string;
+      arrears: number;
+      current_bill: number;
+      total_paid: number;
+      balance: number;
+    }[];
+  };
+
+  const children = ((data ?? []) as unknown as Raw[])
+    // Eldest first, so the list reads the way the parent thinks of their children.
+    .sort((a, b) => (b.class?.promotion_order ?? 0) - (a.class?.promotion_order ?? 0))
+    .map((row) => {
+      const account = row.fee_accounts[0];
+      return {
+        studentId: row.id,
+        admissionNumber: row.admission_number,
+        fullName: [row.last_name, row.first_name, row.middle_name].filter(Boolean).join(' '),
+        className: row.class?.name ?? '—',
+        arrears: toAmount(account?.arrears ?? 0),
+        currentBill: toAmount(account?.current_bill ?? 0),
+        totalPaid: toAmount(account?.total_paid ?? 0),
+        balance: toAmount(account?.balance ?? 0),
+        hasAccount: Boolean(account),
+      };
+    });
+
+  return {
+    id: family.id,
+    name: family.name,
+    phone: family.phone,
+    email: family.email,
+    notes: family.notes,
+    children,
+    outstanding: toAmount(children.reduce((sum, child) => sum + child.balance, 0)),
+  };
+});
+
+export interface UnassignedStudent {
+  id: string;
+  admissionNumber: string;
+  fullName: string;
+  className: string;
+  familyId: string | null;
+  familyName: string | null;
+}
+
+/**
+ * Pupils matching a search, for adding to a household. Children already in
+ * another family are returned too, labelled — moving one is legitimate, but the
+ * bursar should see they are taking them from somewhere.
+ */
+export async function searchStudentsForFamily(
+  search: string,
+  limit = 20,
+): Promise<UnassignedStudent[]> {
+  const term = search.trim();
+  if (!term) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('students')
+    .select(
+      `id, admission_number, first_name, last_name, middle_name, family_id,
+       class:classes(name), family:families(name)`,
+    )
+    .is('archived_at', null)
+    .eq('status', 'active')
+    .or(
+      `first_name.ilike.%${term}%,last_name.ilike.%${term}%,admission_number.ilike.%${term}%`,
+    )
+    .order('last_name')
+    .limit(limit);
+  if (error) fail('Failed to search for pupils', error);
+
+  type Raw = {
+    id: string;
+    admission_number: string;
+    first_name: string;
+    last_name: string;
+    middle_name: string | null;
+    family_id: string | null;
+    class: { name: string } | null;
+    family: { name: string } | null;
+  };
+
+  return ((data ?? []) as unknown as Raw[]).map((row) => ({
+    id: row.id,
+    admissionNumber: row.admission_number,
+    fullName: [row.last_name, row.first_name, row.middle_name].filter(Boolean).join(' '),
+    className: row.class?.name ?? '—',
+    familyId: row.family_id,
+    familyName: row.family?.name ?? null,
+  }));
+}
+
+/** Past handovers for a household, newest first, with each child's slip. */
+export const getFamilyPayments = cache(async function getFamilyPayments(
+  familyId: string,
+  limit = 20,
+) {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from('family_payments')
+    .select(
+      `*, term:terms(label, session:academic_sessions(name)),
+       payments:fee_payments(id, amount, receipt_number, voided_at,
+         student:students(first_name, last_name, admission_number, class:classes(name)))`,
+    )
+    .eq('family_id', familyId)
+    .order('paid_at', { ascending: false })
+    .limit(limit);
+  if (error) fail('Failed to load family payment history', error);
+  return data ?? [];
+});
