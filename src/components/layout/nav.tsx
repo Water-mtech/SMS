@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowUpRight,
   BookOpen,
@@ -86,6 +87,10 @@ export function DesktopNav() {
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
+  // Portals need a DOM to land in, so nothing renders until after hydration.
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
 
   return (
     <div className="lg:hidden print:hidden">
@@ -99,34 +104,46 @@ export function MobileNav() {
         <Menu className="h-5 w-5" aria-hidden="true" />
       </button>
 
-      {open && (
-        <div className="fixed inset-0 z-50 flex">
-          <div
-            className="absolute inset-0 bg-slate-900/50"
-            onClick={() => setOpen(false)}
-            aria-hidden="true"
-          />
-          <div
-            className={cn(
-              'relative z-10 flex h-full w-64 flex-col gap-6 px-4 py-6 shadow-xl animate-slide-in',
-              PANEL_CLASSES,
-            )}
-          >
-            <div className="flex items-center justify-between">
-              <BrandMark />
-              <button
-                type="button"
-                onClick={() => setOpen(false)}
-                aria-label="Close navigation menu"
-                className="rounded-lg p-1.5 text-brand-100 hover:bg-brand-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-              </button>
+      {/*
+        Rendered into document.body rather than in place. The app header carries
+        `backdrop-blur`, and a backdrop-filter makes an element the containing
+        block for its fixed-position descendants — so a drawer left here would
+        be trapped inside the header's box: clipped to its height, with the
+        links below spilling over the page on no background at all. The portal
+        puts the overlay back against the viewport, where `fixed inset-0` means
+        what it says. The same reasoning is why Modal portals.
+      */}
+      {mounted &&
+        open &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex lg:hidden print:hidden">
+            <div
+              className="absolute inset-0 bg-slate-900/50"
+              onClick={() => setOpen(false)}
+              aria-hidden="true"
+            />
+            <div
+              className={cn(
+                'relative z-10 flex h-full w-64 flex-col gap-6 overflow-y-auto px-4 py-6 shadow-xl animate-slide-in',
+                PANEL_CLASSES,
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <BrandMark />
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  aria-label="Close navigation menu"
+                  className="rounded-lg p-1.5 text-brand-100 hover:bg-brand-600 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                >
+                  <X className="h-4 w-4" aria-hidden="true" />
+                </button>
+              </div>
+              <NavLinks onNavigate={() => setOpen(false)} />
             </div>
-            <NavLinks onNavigate={() => setOpen(false)} />
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
