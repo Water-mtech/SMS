@@ -134,6 +134,7 @@ export interface Database {
           guardian_name: string | null;
           guardian_phone: string | null;
           guardian_email: string | null;
+          family_id: string | null;
           status: StudentStatus;
           admitted_on: string;
           archived_at: string | null;
@@ -152,6 +153,7 @@ export interface Database {
           guardian_name?: string | null;
           guardian_phone?: string | null;
           guardian_email?: string | null;
+          family_id?: string | null;
           status?: StudentStatus;
           admitted_on?: string;
         };
@@ -165,6 +167,13 @@ export interface Database {
             columns: ['class_id'];
             isOneToOne: false;
             referencedRelation: 'classes';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'students_family_id_fkey';
+            columns: ['family_id'];
+            isOneToOne: false;
+            referencedRelation: 'families';
             referencedColumns: ['id'];
           },
         ];
@@ -338,6 +347,8 @@ export interface Database {
           balance_after: number;
           paid_at: string;
           recorded_by: string | null;
+          /** Set when this slip was part of one handover covering several siblings. */
+          family_payment_id: string | null;
           voided_at: string | null;
           voided_reason: string | null;
           created_at: string;
@@ -356,6 +367,7 @@ export interface Database {
           balance_after: number;
           paid_at?: string;
           recorded_by?: string | null;
+          family_payment_id?: string | null;
         };
         Update: { voided_at?: string | null; voided_reason?: string | null };
         Relationships: [
@@ -364,6 +376,13 @@ export interface Database {
             columns: ['account_id'];
             isOneToOne: false;
             referencedRelation: 'fee_accounts';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'fee_payments_family_payment_id_fkey';
+            columns: ['family_payment_id'];
+            isOneToOne: false;
+            referencedRelation: 'family_payments';
             referencedColumns: ['id'];
           },
           {
@@ -502,9 +521,109 @@ export interface Database {
           },
         ];
       };
+      families: {
+        Row: {
+          id: string;
+          name: string;
+          phone: string | null;
+          email: string | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          phone?: string | null;
+          email?: string | null;
+          notes?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['families']['Insert']>;
+        Relationships: [];
+      };
+      family_payments: {
+        Row: {
+          id: string;
+          family_id: string;
+          term_id: string;
+          receipt_number: string;
+          total_amount: number;
+          method: PaymentMethod;
+          reference: string | null;
+          notes: string | null;
+          balance_before: number;
+          balance_after: number;
+          paid_at: string;
+          recorded_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          family_id: string;
+          term_id: string;
+          receipt_number: string;
+          total_amount: number;
+          method?: PaymentMethod;
+          reference?: string | null;
+          notes?: string | null;
+          balance_before: number;
+          balance_after: number;
+          paid_at?: string;
+          recorded_by?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['family_payments']['Insert']>;
+        Relationships: [
+          {
+            foreignKeyName: 'family_payments_family_id_fkey';
+            columns: ['family_id'];
+            isOneToOne: false;
+            referencedRelation: 'families';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'family_payments_term_id_fkey';
+            columns: ['term_id'];
+            isOneToOne: false;
+            referencedRelation: 'terms';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
     };
-    Views: { [_ in never]: never };
+    Views: {
+      /** One row per household: combined outstanding for the current term. */
+      family_balances: {
+        Row: {
+          family_id: string;
+          name: string;
+          phone: string | null;
+          email: string | null;
+          children: number;
+          outstanding: number;
+          billed: number;
+          paid: number;
+        };
+        Relationships: [];
+      };
+    };
     Functions: {
+      record_family_payment: {
+        Args: {
+          p_family_id: string;
+          p_term_id: string;
+          /** `[{ student_id, amount }]` — children receiving nothing may be omitted. */
+          p_allocations: Json;
+          p_method?: PaymentMethod;
+          p_reference?: string | null;
+          p_notes?: string | null;
+          p_paid_at?: string;
+        };
+        Returns: Database['public']['Tables']['family_payments']['Row'];
+      };
+      set_student_family: {
+        Args: { p_family_id: string | null; p_student_ids: string[] };
+        Returns: number;
+      };
       set_student_stationery: {
         Args: { p_student_id: string; p_term_id: string; p_items: Json };
         Returns: Database['public']['Tables']['stationery_issues']['Row'][];

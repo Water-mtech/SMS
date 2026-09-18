@@ -12,6 +12,7 @@ import {
   Receipt,
   Settings,
   Users,
+  Users2,
   X,
 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ const LINKS = [
   { href: '/stationery', label: 'Stationery', icon: BookOpen },
   { href: '/stationery/items', label: 'Stationery Items', icon: PackagePlus },
   { href: '/students', label: 'Students', icon: Users },
+  { href: '/families', label: 'Families', icon: Users2 },
   { href: '/fees', label: 'Fees & Payments', icon: Receipt },
   { href: '/promotions', label: 'Promotions', icon: ArrowUpRight },
   { href: '/fees/structures', label: 'Fee Structures', icon: Settings },

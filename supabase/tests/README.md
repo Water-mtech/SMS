@@ -23,6 +23,7 @@ psql -h /tmp -p 55432 -U postgres -c "
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/01_business_logic.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/02_row_level_security.sql
 psql -h /tmp -p 55432 -U postgres -f supabase/tests/03_stationery_catalogue.sql
+psql -h /tmp -p 55432 -U postgres -f supabase/tests/04_family_payments.sql
 ```
 
 `01_business_logic.sql` covers the bulk importer, the dual ledger, part payments
@@ -42,6 +43,14 @@ retiring an item removes it from the matrix without erasing the record of
 students who already received it, even after their drawer is re-saved. It also covers per-issue quantities: they are stored and updated in
 place, and values that are zero, missing or absurd are clamped to 1..999 rather
 than raising a constraint violation.
+
+`04_family_payments.sql` covers siblings paying together: grouping pupils into a
+household, the combined outstanding across classes, a part payment splitting
+into one numbered slip per child under a single family receipt, and the snapshot
+the parent is shown. It also asserts the refusals — overpaying one child fails
+the whole handover with every ledger untouched, a pupil from another household
+cannot be paid for through this family, an archived child drops out of the
+family total, and a teacher may read families but never take money.
 
 Every `PASS:` notice is an assertion that held. Any `FAIL:` line, or any error
 other than the ones the scripts deliberately provoke, is a regression.
